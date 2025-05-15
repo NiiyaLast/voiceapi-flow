@@ -68,13 +68,13 @@ const demoapp = {
 
         ws.onmessage = (e) => {
             const data = JSON.parse(e.data);
-            const { text, finished, idx } = data;
+            const { text, start_time, finished, idx } = data;
 
             currentMessage = text;
             this.currentText = text
 
             if (finished) {
-                this.logs.push({ text: currentMessage, idx: idx });
+                this.logs.push({ text: currentMessage, startTime:start_time, idx: idx });
                 currentMessage = '';
                 this.currentText = null
             }

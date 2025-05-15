@@ -6,19 +6,20 @@ import sherpa_onnx
 import os
 import asyncio
 import numpy as np
+from toexcel.toexcel import export_to_excel  # 导入 toexcel.py 中的函数
 
 logger = logging.getLogger(__file__)
 _asr_engines = {}
 
 
 class ASRResult:
-    def __init__(self, text: str, finished: bool, idx: int):
+    def __init__(self, text: str, start_time: str, finished: bool, idx: int):
         self.text = text
         self.finished = finished
         self.idx = idx
-
+        self.start_time = start_time
     def to_dict(self):
-        return {"text": self.text, "finished": self.finished, "idx": self.idx}
+        return {"text": self.text, "start_time": self.start_time,  "finished": self.finished, "idx": self.idx}
 
 
 class ASRStream:
@@ -29,6 +30,7 @@ class ASRStream:
         self.sample_rate = sample_rate
         self.is_closed = False
         self.online = isinstance(recognizer, sherpa_onnx.OnlineRecognizer)
+        self.results = []
 
     async def start(self):
         if self.online:
@@ -36,33 +38,33 @@ class ASRStream:
         else:
             asyncio.create_task(self.run_offline())
 
-    async def run_online(self):
-        stream = self.recognizer.create_stream()
-        last_result = ""
-        segment_id = 0
-        logger.info('asr: start real-time recognizer')
-        while not self.is_closed:
-            samples = await self.inbuf.get()
-            stream.accept_waveform(self.sample_rate, samples)
-            while self.recognizer.is_ready(stream):
-                self.recognizer.decode_stream(stream)
+    # async def run_online(self):
+    #     stream = self.recognizer.create_stream()
+    #     last_result = ""
+    #     segment_id = 0
+    #     logger.info('asr: start real-time recognizer')
+    #     while not self.is_closed:
+    #         samples = await self.inbuf.get()
+    #         stream.accept_waveform(self.sample_rate, samples)
+    #         while self.recognizer.is_ready(stream):
+    #             self.recognizer.decode_stream(stream)
 
-            is_endpoint = self.recognizer.is_endpoint(stream)
-            result = self.recognizer.get_result(stream)
+    #         is_endpoint = self.recognizer.is_endpoint(stream)
+    #         result = self.recognizer.get_result(stream)
 
-            if result and (last_result != result):
-                last_result = result
-                logger.info(f' > {segment_id}:{result}')
-                self.outbuf.put_nowait(
-                    ASRResult(result, False, segment_id))
+    #         if result and (last_result != result):
+    #             last_result = result
+    #             logger.info(f' > {segment_id}:{result}')
+    #             self.outbuf.put_nowait(
+    #                 ASRResult(result, False, segment_id))
 
-            if is_endpoint:
-                if result:
-                    logger.info(f'{segment_id}: {result}')
-                    self.outbuf.put_nowait(
-                        ASRResult(result, True, segment_id))
-                    segment_id += 1
-                self.recognizer.reset(stream)
+    #         if is_endpoint:
+    #             if result:
+    #                 logger.info(f'{segment_id}: {result}')
+    #                 self.outbuf.put_nowait(
+    #                     ASRResult(result, True, segment_id))
+    #                 segment_id += 1
+    #             self.recognizer.reset(stream)
 
     async def run_offline(self):
         vad = _asr_engines['vad']
@@ -83,14 +85,21 @@ class ASRStream:
                 result = stream.result.text.strip()
                 if result:
                     duration = time.time() - st
+                    current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st))
+                    self.results.append({"time": current_time, "result": result})
                     logger.info(f'{segment_id}:{result} ({duration:.2f}s)')
-                    self.outbuf.put_nowait(ASRResult(result, True, segment_id))
+                    self.outbuf.put_nowait(ASRResult(result, current_time, True, segment_id))
                     segment_id += 1
             st = None
 
     async def close(self):
         self.is_closed = True
         self.outbuf.put_nowait(None)
+        # 调用 toexcel.py 的方法，将 self.results 导出为 Excel
+        if self.results:
+            first_time = self.results[0]["time"].replace(":", "-").replace(" ", "_")
+            filename = f"asr_results_{first_time}.xlsx"
+            export_to_excel(self.results, filename)
 
     async def write(self, pcm_bytes: bytes):
         pcm_data = np.frombuffer(pcm_bytes, dtype=np.int16)

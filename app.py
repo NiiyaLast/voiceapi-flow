@@ -41,6 +41,7 @@ async def websocket_asr(websocket: WebSocket,
             if not result:
                 return
             await websocket.send_json(result.to_dict())
+            logger.info(result.to_dict())
     try:
         await asyncio.gather(task_recv_pcm(), task_send_result())
     except WebSocketDisconnect:
