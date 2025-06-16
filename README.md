@@ -5,4 +5,5 @@
 <img src="./ui.png" width="60%">
 <img src="./excel.png" width="60%">
 
+打包：pyinstaller --onefile app.py
 **停止录音后，转录内容将保存到download目录**
