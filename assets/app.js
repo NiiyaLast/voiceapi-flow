@@ -56,9 +56,13 @@ const demoapp = {
             video: false,
             audio: true,
         };
-
-        const mediaStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
-
+        console.log('请求麦克风权限');
+        // const mediaStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+        const mediaStream = await navigator.mediaDevices.getUserMedia(audioConstraints).catch(err => {
+            alert("无法访问麦克风：" + err.message);
+            console.error(err);
+            return null;
+        });
         const ws = new WebSocket('/asr');
         let currentMessage = '';
 
