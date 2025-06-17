@@ -28,3 +28,5 @@ models/
 examples/*.wav
 models
 download/
+build/
+dist/
