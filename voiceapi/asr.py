@@ -7,6 +7,8 @@ import os
 import asyncio
 import numpy as np
 from toexcel.toexcel import export_to_excel  # 导入 toexcel.py 中的函数
+import sys
+import keyboard 
 
 logger = logging.getLogger(__file__)
 _asr_engines = {}
@@ -67,13 +69,22 @@ class ASRStream:
     #             self.recognizer.reset(stream)
 
     async def run_offline(self):
+
         vad = _asr_engines['vad']
+
         segment_id = 0
         st = None
         while not self.is_closed:
             samples = await self.inbuf.get()
+
+            # 如果空格没按下，直接丢弃样本，不进行处理
+            if not keyboard.is_pressed(' '):
+                vad.reset()
+                continue
+
+            # 空格已按下，才将音频送入 VAD
             vad.accept_waveform(samples)
-            while not vad.empty():
+            while not vad.empty() and keyboard.is_pressed(' '):
                 if not st:
                     st = time.time()
                 stream = self.recognizer.create_stream()
