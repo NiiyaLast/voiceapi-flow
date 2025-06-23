@@ -11,8 +11,11 @@ const demoapp = {
     async dotts() {
         let audioContext = new AudioContext({ sampleRate: 16000 })
         await audioContext.audioWorklet.addModule('./audio_process.js')
-
         const ws = new WebSocket('/tts');
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket 未正确初始化或未连接');
+            return;
+        }
         ws.onopen = () => {
             ws.send(this.text);
         };
@@ -31,7 +34,8 @@ const demoapp = {
                     playNode.port.postMessage({ message: 'audioData', audioData: float32Array });
                 });
             } else {
-                this.elapsedTime = JSON.parse(e.data)?.elapsed;
+                const parsedData = JSON.parse(e.data);
+                this.elapsedTime = parsedData && parsedData.elapsed;
                 this.disabled = false;
             }
         }
@@ -101,3 +105,5 @@ const demoapp = {
         this.recording = true;
     }
 }
+
+window.demoapp = demoapp;
