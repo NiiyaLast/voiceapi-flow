@@ -9,6 +9,9 @@ import numpy as np
 from toexcel.toexcel import export_to_excel  # 导入 toexcel.py 中的函数
 import sys
 import keyboard 
+import pygame
+import threading
+import winsound  # Windows系统
 
 logger = logging.getLogger(__file__)
 _asr_engines = {}
@@ -74,13 +77,36 @@ class ASRStream:
 
         segment_id = 0
         st = None
+        combined_result = ""  # 用于存储合并的识别结果
+        combined_current_time = None  # 用于存储合并的时间结果
+        previous_space_state = False  # 记录空格键的前一个状态
         while not self.is_closed:
             samples = await self.inbuf.get()
+            current_space_state = keyboard.is_pressed(' ')
 
+            # 检测空格键从按下转变为松开
+            if previous_space_state and not current_space_state:
+                # 松开空格键时，如果有合并的结果，则输出
+                if combined_result.strip():
+                    logger.info(f'松开空格键，输出合并结果: {combined_result.strip()}')
+                    # 替换标点
+                    combined_result = combined_result.replace(" ", "")
+                    combined_result = combined_result[:-1].replace("。", "，") + "。"
+                    self.outbuf.put_nowait(ASRResult(combined_result.strip(), combined_current_time, True, segment_id))
+                    segment_id += 1
+                    combined_result = ""  # 重置合并结果
+                    combined_current_time = None  # 重置时间
+        
             # 如果空格没按下，直接丢弃样本，不进行处理
-            if not keyboard.is_pressed(' '):
+            if not current_space_state:
                 vad.reset()
+                previous_space_state = current_space_state  # 更新状态
                 continue
+
+            if not previous_space_state and current_space_state:
+                # 在新线程中播放开始提示音，避免阻塞主线程
+                threading.Thread(target=self.play_start_sound, daemon=True).start()
+                logger.info("开始录制 - 播放提示音")
 
             # 空格已按下，才将音频送入 VAD
             vad.accept_waveform(samples)
@@ -99,9 +125,83 @@ class ASRStream:
                     current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st))
                     self.results.append({"time": current_time, "result": result})
                     logger.info(f'{segment_id}:{result} ({duration:.2f}s)')
-                    self.outbuf.put_nowait(ASRResult(result, current_time, True, segment_id))
-                    segment_id += 1
+                    # self.outbuf.put_nowait(ASRResult(result, current_time, True, segment_id))
+                    combined_result += result + " "  # 将结果合并到字符串中
+                    # 在新线程中播放处理结束提示音，避免阻塞主线程
+                    threading.Thread(target=self.play_end_sound, daemon=True).start()
+                    # segment_id += 1
+            # 更新前一个状态
+            previous_space_state = current_space_state
             st = None
+
+    def play_start_sound(self):
+        """播放提示音"""
+        try:
+            # 初始化 pygame mixer
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            
+            # 音频文件路径
+            sound_file = os.path.join("assets", "voice", "start.mp3")  # 或 .mp3
+            
+            # 检查文件是否存在
+            if os.path.exists(sound_file):
+                sound = pygame.mixer.Sound(sound_file)
+                sound.play()
+                logger.info(f"播放提示音: {sound_file}")
+        except Exception as e:
+            logger.warning(f"无法播放提示音: {e}")
+            # 备选方案
+            try:
+                winsound.Beep(800, 150)
+            except:
+                pass
+            
+    def play_end_sound(self):
+        """播放提示音"""
+        try:
+            # 初始化 pygame mixer
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            
+            # 音频文件路径
+            sound_file = os.path.join("assets", "voice", "end.mp3")  # 或 .mp3
+            
+            # 检查文件是否存在
+            if os.path.exists(sound_file):
+                sound = pygame.mixer.Sound(sound_file)
+                sound.play()
+                logger.info(f"播放提示音: {sound_file}")
+        except Exception as e:
+            logger.warning(f"无法播放提示音: {e}")
+            # 备选方案
+            try:
+                winsound.Beep(800, 150)
+            except:
+                pass
+    # def play_start_sound(self):
+    #     """播放提示音"""
+    #     try:
+    #         # 初始化 pygame mixer
+    #         if not pygame.mixer.get_init():
+    #             pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
+    #         # 创建一个简单的提示音（440Hz的正弦波，持续0.2秒）
+    #         sample_rate = 22050
+    #         duration = 0.2
+    #         frequency = 440
+            
+    #         frames = int(duration * sample_rate)
+    #         arr = np.zeros((frames, 2))
+            
+    #         for i in range(frames):
+    #             wave = 4096 * np.sin(frequency * 2 * np.pi * i / sample_rate)
+    #             arr[i][0] = wave
+    #             arr[i][1] = wave
+            
+    #         sound = pygame.sndarray.make_sound(arr.astype(np.int16))
+    #         sound.play()
+    #     except Exception as e:
+    #         logger.warning(f"无法播放提示音: {e}")
 
     async def close(self):
         self.is_closed = True
