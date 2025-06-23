@@ -159,7 +159,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8000, help="port number")
     parser.add_argument("--addr", type=str,
-                        default="0.0.0.0", help="serve address")
+                        default="localhost", help="serve address")
 
     parser.add_argument("--asr-provider", type=str,
                         default="cpu", help="asr provider, cpu or cuda")
