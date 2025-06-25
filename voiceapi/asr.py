@@ -12,6 +12,7 @@ import keyboard
 import pygame
 import threading
 import winsound  # Windows系统
+from toexcel.structured_data import load_excel_data 
 
 logger = logging.getLogger(__file__)
 _asr_engines = {}
@@ -36,7 +37,7 @@ class ASRStream:
         self.is_closed = False
         self.online = isinstance(recognizer, sherpa_onnx.OnlineRecognizer)
         self.results = []
-
+        self.combined_results = []  # 用于存储合并的结果
     async def start(self):
         if self.online:
             asyncio.create_task(self.run_online())
@@ -90,9 +91,10 @@ class ASRStream:
                 if combined_result.strip():
                     logger.info(f'松开空格键，输出合并结果: {combined_result.strip()}')
                     # 替换标点
-                    combined_result = combined_result.replace(" ", "")
-                    combined_result = combined_result[:-1].replace("。", "，") + "。"
+                    # combined_result = combined_result.replace(" ", "")
+                    combined_result = combined_result[:-2].replace("。", "，") + "。"
                     self.outbuf.put_nowait(ASRResult(combined_result.strip(), combined_current_time, True, segment_id))
+                    self.combined_results.append({"time": combined_current_time, "result": combined_result})
                     segment_id += 1
                     combined_result = ""  # 重置合并结果
                     combined_current_time = None  # 重置时间
@@ -102,12 +104,12 @@ class ASRStream:
                 vad.reset()
                 previous_space_state = current_space_state  # 更新状态
                 continue
-
+            # 如果空格键从未按下到按下，播放开始提示音并写入时间
             if not previous_space_state and current_space_state:
                 # 在新线程中播放开始提示音，避免阻塞主线程
                 threading.Thread(target=self.play_start_sound, daemon=True).start()
                 logger.info("开始录制 - 播放提示音")
-
+                combined_current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
             # 空格已按下，才将音频送入 VAD
             vad.accept_waveform(samples)
             while not vad.empty() and keyboard.is_pressed(' '):
@@ -156,7 +158,7 @@ class ASRStream:
                 winsound.Beep(800, 150)
             except:
                 pass
-            
+
     def play_end_sound(self):
         """播放提示音"""
         try:
@@ -179,38 +181,25 @@ class ASRStream:
                 winsound.Beep(800, 150)
             except:
                 pass
-    # def play_start_sound(self):
-    #     """播放提示音"""
-    #     try:
-    #         # 初始化 pygame mixer
-    #         if not pygame.mixer.get_init():
-    #             pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
-    #         # 创建一个简单的提示音（440Hz的正弦波，持续0.2秒）
-    #         sample_rate = 22050
-    #         duration = 0.2
-    #         frequency = 440
-            
-    #         frames = int(duration * sample_rate)
-    #         arr = np.zeros((frames, 2))
-            
-    #         for i in range(frames):
-    #             wave = 4096 * np.sin(frequency * 2 * np.pi * i / sample_rate)
-    #             arr[i][0] = wave
-    #             arr[i][1] = wave
-            
-    #         sound = pygame.sndarray.make_sound(arr.astype(np.int16))
-    #         sound.play()
-    #     except Exception as e:
-    #         logger.warning(f"无法播放提示音: {e}")
 
     async def close(self):
         self.is_closed = True
         self.outbuf.put_nowait(None)
         # 调用 toexcel.py 的方法，将 self.results 导出为 Excel
-        if self.results:
-            first_time = self.results[0]["time"].replace(":", "-").replace(" ", "_")
+        if self.combined_results:
+            print(self.combined_results)
+            first_time = self.combined_results[0]["time"].replace(":", "-").replace(" ", "_")
             filename = f"asr_results_{first_time}.xlsx"
-            export_to_excel(self.results, filename)
+            export_to_excel(self.combined_results, filename)
+            # file_path = r"C:\niiya\tools\AI\voiceapi\voiceapi\download"  # 替换为实际路径
+            # file_name = "asr_results.xlsx"  # 替换为实际文件名
+            output_dir = "./download"
+            os.makedirs(output_dir, exist_ok=True)
+
+            # 拼接完整路径
+            filepath = os.path.join(output_dir)
+            # 使用开放接口读取数据并进行AI处理
+            load_excel_data(filepath, filename, enable_ai_processing=True)
 
     async def write(self, pcm_bytes: bytes):
         pcm_data = np.frombuffer(pcm_bytes, dtype=np.int16)
