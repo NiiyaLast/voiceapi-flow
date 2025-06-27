@@ -2,6 +2,8 @@ import pandas as pd
 import os
 # from .structured_data import load_excel_data 
 from openpyxl import load_workbook, Workbook
+import subprocess
+import platform
 
 def export_to_excel(results, filename):
     """
@@ -24,6 +26,8 @@ def export_to_excel(results, filename):
     df.to_excel(filepath, index=False)
 
     print(f"Results exported to {filepath}")
+
+    open_excel_file(filepath)
 
     # file_path = r"C:\niiya\tools\AI\voiceapi\voiceapi\download"  # 替换为实际路径
     # file_name = "asr_results_2025-06-23_18-09-33.xlsx"  # 替换为实际文件名
@@ -90,3 +94,39 @@ def export_to_excel_sheetn(results, filename, sheet_name="Sheet2"):
     except Exception as e:
         print(f"写入Excel文件时出错: {e}")
         return False
+    
+def open_excel_file(filepath):
+    """
+    跨平台打开 Excel 文件
+    
+    :param filepath: Excel 文件的完整路径
+    """
+    try:
+        # 获取绝对路径
+        abs_filepath = os.path.abspath(filepath)
+        
+        # 根据操作系统选择合适的打开方式
+        system = platform.system()
+        
+        if system == "Windows":
+            # Windows 系统
+            os.startfile(abs_filepath)
+            print(f"已在 Windows 中打开文件: {abs_filepath}")
+            
+        elif system == "Darwin":  # macOS
+            # macOS 系统
+            subprocess.run(["open", abs_filepath])
+            print(f"已在 macOS 中打开文件: {abs_filepath}")
+            
+        elif system == "Linux":
+            # Linux 系统
+            subprocess.run(["xdg-open", abs_filepath])
+            print(f"已在 Linux 中打开文件: {abs_filepath}")
+            
+        else:
+            print(f"不支持的操作系统: {system}")
+            print(f"请手动打开文件: {abs_filepath}")
+            
+    except Exception as e:
+        print(f"打开文件时出错: {e}")
+        print(f"请手动打开文件: {filepath}")
