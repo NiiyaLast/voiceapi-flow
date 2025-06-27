@@ -6,6 +6,8 @@ const demoapp = {
     disabled: false,
     elapsedTime: null,
     logs: [{ idx: 0, text: 'Happily here at ruzhila.cn.' }],
+
+    
     async init() {
     },
     async dotts() {
@@ -103,7 +105,44 @@ const demoapp = {
         source.connect(recordNode);
         this.asrWS = ws;
         this.recording = true;
-    }
+    },
+    // 简化的AI处理方法
+    async processWithAI() {
+        this.aiProcessing = true;
+        this.aiProcessingResult = null;
+        
+        try {
+            console.log('开始AI处理最新Excel文件...');
+            
+            const response = await fetch('/ai-process-excel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            this.aiProcessingResult = result;
+            
+            console.log('AI处理完成:', result);
+            
+            // 显示处理结果
+            const message = `AI处理完成！`;
+                
+            alert(message);
+            
+        } catch (error) {
+            console.error('AI处理失败:', error);
+            alert(`AI处理失败: ${error.message}`);
+        } finally {
+            this.aiProcessing = false;
+        }
+    },
 }
 
 window.demoapp = demoapp;

@@ -262,7 +262,19 @@
         isProcessing: false,
         elapsedTime: 0,
         timer: null,
+        async processWithAI () {
+            await window.demoapp.processWithAI.call(this);
+        },
+        async doasr() {
+        await window.demoapp.doasr.call(this);
+        this.startRecording();
+        },
         
+        async stopasr() {
+            await window.demoapp.stopasr.call(this);
+            this.stopRecording();
+        },
+
         startRecording() {
             this.recording = true;
             this.currentText = '';
@@ -540,7 +552,8 @@
                     </div>
                 </div>
                 
-                <div class="glass-card p-5 rounded-xl border border-gray-700 hover:border-indigo-500 transition-colors">
+                <div class="glass-card p-5 rounded-xl border border-gray-700 hover:border-indigo-500 transition-colors"
+                    @click="processWithAI">
                     <div class="flex items-start">
                         <div class="bg-cyan-500/10 p-2 rounded-lg">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -549,7 +562,7 @@
                         </div>
                         <div class="ml-4">
                             <h3 class="font-bold text-lg mb-1">AI Processing</h3>
-                            <p class="text-gray-400">Context-aware responses powered by machine learning.</p>
+                            <p class="text-gray-400">Text Categorization Processing Driven by Machine Learning.</p>
                         </div>
                     </div>
                 </div>
