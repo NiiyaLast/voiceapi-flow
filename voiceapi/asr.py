@@ -108,7 +108,7 @@ class ASRStream:
             if not previous_space_state and current_space_state:
                 # 在新线程中播放开始提示音，避免阻塞主线程
                 threading.Thread(target=self.play_start_sound, daemon=True).start()
-                logger.info("开始录制 - 播放提示音")
+                # logger.info("开始录制 - 播放提示音")
                 combined_current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
             # 空格已按下，才将音频送入 VAD
             vad.accept_waveform(samples)
@@ -150,7 +150,7 @@ class ASRStream:
             if os.path.exists(sound_file):
                 sound = pygame.mixer.Sound(sound_file)
                 sound.play()
-                logger.info(f"播放提示音: {sound_file}")
+                # logger.info(f"播放提示音: {sound_file}")
         except Exception as e:
             logger.warning(f"无法播放提示音: {e}")
             # 备选方案
@@ -173,7 +173,7 @@ class ASRStream:
             if os.path.exists(sound_file):
                 sound = pygame.mixer.Sound(sound_file)
                 sound.play()
-                logger.info(f"播放提示音: {sound_file}")
+                # logger.info(f"播放提示音: {sound_file}")
         except Exception as e:
             logger.warning(f"无法播放提示音: {e}")
             # 备选方案
@@ -193,13 +193,13 @@ class ASRStream:
             export_to_excel(self.combined_results, filename)
             # file_path = r"C:\niiya\tools\AI\voiceapi\voiceapi\download"  # 替换为实际路径
             # file_name = "asr_results.xlsx"  # 替换为实际文件名
-            output_dir = "./download"
-            os.makedirs(output_dir, exist_ok=True)
+            # output_dir = "./download"
+            # os.makedirs(output_dir, exist_ok=True)
 
-            # 拼接完整路径
-            filepath = os.path.join(output_dir)
-            # 使用开放接口读取数据并进行AI处理
-            load_excel_data(filepath, filename, enable_ai_processing=True)
+            # # 拼接完整路径
+            # filepath = os.path.join(output_dir)
+            # # 使用开放接口读取数据并进行AI处理
+            # load_excel_data(filepath, filename, enable_ai_processing=False)
 
     async def write(self, pcm_bytes: bytes):
         pcm_data = np.frombuffer(pcm_bytes, dtype=np.int16)
@@ -300,6 +300,21 @@ def create_fireredasr(samplerate: int, args) -> sherpa_onnx.OnlineRecognizer:
     encoder = os.path.join(d, "encoder.int8.onnx")
     decoder = os.path.join(d, "decoder.int8.onnx")
     tokens = os.path.join(d, "tokens.txt")
+
+    # 添加文件存在性检查
+    for file_path, file_name in [(encoder, "encoder.int8.onnx"), 
+                                 (decoder, "decoder.int8.onnx"), 
+                                 (tokens, "tokens.txt")]:
+        if not os.path.exists(file_path):
+            raise ValueError(f"asr: required file not found: {file_path}")
+        
+        # 检查文件大小（ONNX 文件不应该为空）
+        if file_name.endswith('.onnx') and os.path.getsize(file_path) == 0:
+            raise ValueError(f"asr: model file is empty: {file_path}")
+    
+    # logger.info(f"Loading FireRedASR model from {d}")
+    # logger.info(f"Encoder: {encoder} (size: {os.path.getsize(encoder)} bytes)")
+    # logger.info(f"Decoder: {decoder} (size: {os.path.getsize(decoder)} bytes)")
 
     recognizer = sherpa_onnx.OfflineRecognizer.from_fire_red_asr(
         encoder=encoder,
