@@ -13,15 +13,19 @@ import argparse
 import glob
 import os
 from datetime import datetime
-from toexcel.structured_data import load_excel_data
+from toexcel.structured_data import process_excel_with_ai
+from config_manager import get_config
 
 app = FastAPI()
 logger = logging.getLogger(__file__)
 
-# 添加获取最新Excel文件的函数
+# 获取配置实例（根据配置文件设置决定是否启用自动重载）
+config = get_config()
+
+# 获取最新待处理的Excel文件
 def get_latest_excel_file():
     """获取download目录下最新的以'asr_results_'开头的Excel文件"""
-    download_dir = "./download"
+    download_dir = config.storage.download_dir
     
     if not os.path.exists(download_dir):
         logger.warning(f"下载目录不存在: {download_dir}")
@@ -72,11 +76,11 @@ async def ai_process_latest_excel():
         
         logger.info(f"开始AI处理最新文件: {file_path}/{file_name}")
         
-        # 调用structured_data的load_excel_data函数
-        reader = load_excel_data(
+        # 调用structured_data的process_excel_with_ai函数
+        reader = process_excel_with_ai(
             file_path=file_path,
             file_name=file_name,
-            enable_ai_processing=True
+            enable_ai_processing=config.ai.enabled
         )
         
         # 获取处理结果
@@ -117,7 +121,7 @@ async def ai_process_latest_excel():
 
 @app.websocket("/asr")
 async def websocket_asr(websocket: WebSocket,
-                        samplerate: int = Query(16000, title="Sample Rate",
+                        samplerate: int = Query(config.asr.sample_rate, title="Sample Rate",
                                                 description="The sample rate of the audio."),):
     await websocket.accept()
 
@@ -151,7 +155,7 @@ async def websocket_asr(websocket: WebSocket,
 
 @app.websocket("/tts")
 async def websocket_tts(websocket: WebSocket,
-                        samplerate: int = Query(16000,
+                        samplerate: int = Query(config.asr.sample_rate,
                                                 title="Sample Rate",
                                                 description="The sample rate of the generated audio."),
                         interrupt: bool = Query(True,
@@ -160,10 +164,10 @@ async def websocket_tts(websocket: WebSocket,
                         sid: int = Query(0,
                                          title="Speaker ID",
                                          description="The ID of the speaker to use for TTS."),
-                        chunk_size: int = Query(1024,
+                        chunk_size: int = Query(config.tts.chunk_size,
                                                 title="Chunk Size",
                                                 description="The size of the chunk to send to the client."),
-                        speed: float = Query(1.0,
+                        speed: float = Query(config.tts.speed,
                                              title="Speed",
                                              description="The speed of the generated audio."),
                         split: bool = Query(True,
@@ -225,9 +229,9 @@ class TTSRequest(BaseModel):
                       examples=["Hello, world!"])
     sid: int = Field(0, title="Speaker ID",
                      description="The ID of the speaker to use for TTS.")
-    samplerate: int = Field(16000, title="Sample Rate",
+    samplerate: int = Field(config.asr.sample_rate, title="Sample Rate",
                             description="The sample rate of the generated audio.")
-    speed: float = Field(1.0, title="Speed",
+    speed: float = Field(config.tts.speed, title="Speed",
                          description="The speed of the generated audio.")
 
 
@@ -247,8 +251,73 @@ async def tts_generate(req: TTSRequest):
     return StreamingResponse(r, media_type="audio/wav")
 
 
+# 配置管理API端点
+
+class ConfigUpdateRequest(BaseModel):
+    """配置更新请求"""
+    key: str = Field(..., description="配置键（支持点号分隔的嵌套键）")
+    value: Any = Field(..., description="配置值")
+
+@app.post("/api/config", description="Update configuration")
+async def update_config(request: ConfigUpdateRequest):
+    """更新配置"""
+    try:
+        config.set(request.key, request.value)
+        config.save()
+        
+        # 重新验证配置
+        if not config.validate():
+            raise HTTPException(status_code=400, detail="配置更新后验证失败")
+        
+        return {
+            "status": "success",
+            "message": f"配置 {request.key} 更新成功",
+            "new_value": config.get(request.key)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"配置更新失败: {str(e)}")
+
+@app.post("/api/config/reload", description="Reload configuration from file")
+async def reload_configuration():
+    """重新加载配置文件"""
+    try:
+        from config_manager import reload_config
+        reload_config()
+        return {
+            "status": "success",
+            "message": "配置重新加载成功"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"配置重新加载失败: {str(e)}")
+
+@app.get("/api/system/status")
+async def get_system_status():
+    """
+    获取系统状态信息
+    """
+    try:
+        # 导入AI处理器并检查ollama服务状态
+        from ai_models.ai_api import CarTestDataProcessor
+        processor = CarTestDataProcessor()
+        ollama_status = processor.check_service_status()
+        
+        return {
+            "api_connection": "Active" if ollama_status else "Inactive",
+            "api_connection_status": ollama_status,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"检查系统状态时出错: {e}")
+        return {
+            "api_connection": "Error",
+            "api_connection_status": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 if __name__ == "__main__":
-    models_root = './models'
+    # 从配置文件获取默认值
+    models_root = config.storage.models_dir
 
     for d in ['.', '..', '../..']:
         if os.path.isdir(f'{d}/models'):
@@ -256,28 +325,28 @@ if __name__ == "__main__":
             break
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8000, help="port number")
+    parser.add_argument("--port", type=int, default=config.server.port, help="port number")
     parser.add_argument("--addr", type=str,
-                        default="localhost", help="serve address")
+                        default=config.server.host, help="serve address")
 
     parser.add_argument("--asr-provider", type=str,
-                        default="cpu", help="asr provider, cpu or cuda")
+                        default=config.asr.provider, help="asr provider, cpu or cuda")
     parser.add_argument("--tts-provider", type=str,
-                        default="cpu", help="tts provider, cpu or cuda")
+                        default=config.tts.provider, help="tts provider, cpu or cuda")
 
-    parser.add_argument("--threads", type=int, default=2,
+    parser.add_argument("--threads", type=int, default=config.processing.threads,
                         help="number of threads")
 
     parser.add_argument("--models-root", type=str, default=models_root,
                         help="model root directory")
 
-    parser.add_argument("--asr-model", type=str, default='fireredasr',
+    parser.add_argument("--asr-model", type=str, default=config.asr.model,
                         help="ASR model name: zipformer-bilingual, sensevoice, paraformer-trilingual, paraformer-en, fireredasr")
 
-    parser.add_argument("--asr-lang", type=str, default='zh',
+    parser.add_argument("--asr-lang", type=str, default=config.asr.language,
                         help="ASR language, zh, en, ja, ko, yue")
 
-    parser.add_argument("--tts-model", type=str, default='vits-zh-hf-theresa',
+    parser.add_argument("--tts-model", type=str, default=config.tts.model,
                         help="TTS model name: vits-zh-hf-theresa, vits-melo-tts-zh_en, kokoro-multi-lang-v1_0")
 
     args = parser.parse_args()
@@ -289,6 +358,17 @@ if __name__ == "__main__":
 
     app.mount("/", app=StaticFiles(directory="./assets", html=True), name="assets")
 
-    logging.basicConfig(format='%(levelname)s: %(asctime)s %(name)s:%(lineno)s %(message)s',
-                        level=logging.INFO)
+    # 使用配置的日志设置
+    log_config = config.logging_config
+    logging.basicConfig(format=log_config.format, level=getattr(logging, log_config.level.upper()))
+    
+    # 验证配置
+    if not config.validate():
+        logger.error("配置验证失败，程序退出")
+        exit(1)
+    
+    # logger.info(f"启动服务器: {args.addr}:{args.port}")
+    logger.info(f"AI处理: {'启用' if config.ai.enabled else '禁用'}")
+    logger.info(f"Excel导出: {'启用' if config.storage.export_excel else '禁用'}")
+    
     uvicorn.run(app, host=args.addr, port=args.port)

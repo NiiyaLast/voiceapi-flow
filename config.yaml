@@ -1,0 +1,42 @@
+ai:
+  api_url: http://localhost:11434
+  enabled: true
+  max_retries: 3
+  model_name: qwen3:0.6b
+  timeout: 30
+asr:
+  language: zh
+  model: fireredasr
+  provider: cpu
+  sample_rate: 16000
+logging:
+  format: '%(levelname)s: %(asctime)s %(name)s:%(lineno)s %(message)s'
+  level: INFO
+  # level: DEBUG
+  log_file: null
+processing:
+  batch_size: 100
+  enable_concurrent: false
+  threads: 2
+server:
+  debug: false
+  host: localhost
+  port: 8000
+  auto_reload_config: false  # 是否启用配置文件自动重载监听
+storage:
+  auto_backup: true
+  download_dir: ./download
+  export_excel: true
+  models_dir: ./models
+tts:
+  chunk_size: 1024
+  model: vits-zh-hf-theresa
+  provider: cpu
+  speed: 1.0
+
+# 数据处理配置
+data_processing:
+  current_task_config: "driving_evaluation"  # 当前使用的任务配置文件名
+  ai_processing_enabled: true                # 全局AI处理开关
+  ai_timeout_per_record: 30                 # AI处理超时时间
+  ai_retry_failed_records: false            # 是否重试失败记录
