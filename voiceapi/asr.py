@@ -12,7 +12,6 @@ import keyboard
 import pygame
 import threading
 import winsound  # Windows系统
-from toexcel.structured_data import load_excel_data 
 
 logger = logging.getLogger(__file__)
 _asr_engines = {}
@@ -92,7 +91,7 @@ class ASRStream:
                     logger.info(f'松开空格键，输出合并结果: {combined_result.strip()}')
                     # 替换标点
                     # combined_result = combined_result.replace(" ", "")
-                    combined_result = combined_result[:-2].replace("。", "，") + "。"
+                    # combined_result = combined_result[:-2].replace("。", "，") + "。"
                     self.outbuf.put_nowait(ASRResult(combined_result.strip(), combined_current_time, True, segment_id))
                     self.combined_results.append({"time": combined_current_time, "result": combined_result})
                     segment_id += 1
@@ -191,15 +190,6 @@ class ASRStream:
             first_time = self.combined_results[0]["time"].replace(":", "-").replace(" ", "_")
             filename = f"asr_results_{first_time}.xlsx"
             export_to_excel(self.combined_results, filename)
-            # file_path = r"C:\niiya\tools\AI\voiceapi\voiceapi\download"  # 替换为实际路径
-            # file_name = "asr_results.xlsx"  # 替换为实际文件名
-            # output_dir = "./download"
-            # os.makedirs(output_dir, exist_ok=True)
-
-            # # 拼接完整路径
-            # filepath = os.path.join(output_dir)
-            # # 使用开放接口读取数据并进行AI处理
-            # load_excel_data(filepath, filename, enable_ai_processing=False)
 
     async def write(self, pcm_bytes: bytes):
         pcm_data = np.frombuffer(pcm_bytes, dtype=np.int16)
