@@ -1,6 +1,6 @@
 import pandas as pd
 import os
-# from .structured_data import load_excel_data 
+# from .structured_data import process_excel_with_ai 
 from openpyxl import load_workbook, Workbook
 import subprocess
 import platform
@@ -33,7 +33,7 @@ def export_to_excel(results, filename):
     # file_name = "asr_results_2025-06-23_18-09-33.xlsx"  # 替换为实际文件名
     
     # # 使用开放接口读取数据并进行AI处理
-    # reader = load_excel_data(file_path, file_name, enable_ai_processing=True)
+    # reader = process_excel_with_ai(file_path, file_name, enable_ai_processing=True)
 
 
 def export_to_excel_sheetn(results, filename, sheet_name="Sheet2"):
