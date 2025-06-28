@@ -2,14 +2,39 @@ import requests
 import json
 from typing import Optional
 import os
+import time
+# 添加配置管理导入
+try:
+    from config_manager import get_config
+    config = get_config()
+except ImportError:
+    config = None
+
+# 导入AI日志模块
+try:
+    from .ai_logger import log_ai_process
+except ImportError:
+    # 如果导入失败，定义一个空的日志函数
+    def log_ai_process(*args, **kwargs):
+        pass
 
 class CarTestDataProcessor:
     """汽车测试数据处理器"""
     
-    def __init__(self, model_name: str = "qwen3:8b", base_url: str = "http://localhost:11434"):
-        self.model_name = model_name
-        self.base_url = base_url
-        self.api_url = f"{base_url}/api/chat"
+    def __init__(self, model_name: str = None, base_url: str = None):
+        # 优先使用配置文件的设置，然后是传入参数，最后是默认值
+        if config:
+            self.model_name = model_name or config.ai.model_name
+            self.base_url = base_url or config.ai.api_url
+            self.timeout = config.ai.timeout
+            self.max_retries = config.ai.max_retries
+        # else:
+        #     self.model_name = model_name or "qwen3:8b"
+        #     self.base_url = base_url or "http://localhost:11434"
+        #     self.timeout = 30
+        #     self.max_retries = 3
+            
+        self.api_url = f"{self.base_url}/api/chat"
         
         # 预定义的系统提示词
         self.system_prompt = self._load_system_prompt("system_prompt.txt")
@@ -67,7 +92,7 @@ class CarTestDataProcessor:
         }
         
         try:
-            response = requests.post(self.api_url, json=data)
+            response = requests.post(self.api_url, json=data, timeout=self.timeout)
             response.raise_for_status()
             
             if stream:
@@ -107,13 +132,62 @@ class CarTestDataProcessor:
         if not user_input or not user_input.strip():
             return "输入不能为空"
         
+        # 记录开始时间
+        start_time = time.time()
+        
         # 构建完整的提示词
         full_prompt = f"{self.system_prompt}\n\n用户输入：\n{user_input.strip()}/no_think"
         
-        # 调用模型处理
-        result = self._chat_with_ollama(full_prompt)
-        result = result.strip().replace("<think>", "").replace("</think>", "")
-        return result
+        try:
+            # 调用模型处理
+            result = self._chat_with_ollama(full_prompt)
+            
+            # 计算处理时间
+            processing_time_ms = (time.time() - start_time) * 1000
+            
+            # 检查结果是否为 None
+            if result is None:
+                # 记录失败日志
+                log_ai_process(
+                    original_text=user_input,
+                    ai_result=None,
+                    model_name=self.model_name,
+                    processing_time_ms=processing_time_ms,
+                    status="failed",
+                    error_message="AI模型返回None"
+                )
+                return None
+                
+            # 清理结果
+            result = result.strip().replace("<think>", "").replace("</think>", "")
+            
+            # 记录成功日志
+            log_ai_process(
+                original_text=user_input,
+                ai_result=result,
+                model_name=self.model_name,
+                processing_time_ms=processing_time_ms,
+                status="success"
+            )
+            
+            return result
+            
+        except Exception as e:
+            # 计算处理时间
+            processing_time_ms = (time.time() - start_time) * 1000
+            
+            # 记录错误日志
+            log_ai_process(
+                original_text=user_input,
+                ai_result=None,
+                model_name=self.model_name,
+                processing_time_ms=processing_time_ms,
+                status="error",
+                error_message=str(e)
+            )
+            
+            print(f"处理文本时出错: {e}")
+            return None
     
     def process_text_batch(self, user_inputs: list) -> list:
         """
@@ -126,12 +200,29 @@ class CarTestDataProcessor:
             list: 处理结果列表
         """
         results = []
+        success_count = 0
+        failed_count = 0
+        
         for user_input in user_inputs:
             result = self.process_text(user_input)
             results.append({
                 "input": user_input,
                 "output": result
             })
+            
+            # 统计成功/失败数量
+            if result is not None:
+                success_count += 1
+            else:
+                failed_count += 1
+        
+        # 记录批量处理摘要
+        try:
+            from .ai_logger import log_batch_summary
+            log_batch_summary(len(user_inputs), success_count, failed_count)
+        except ImportError:
+            pass
+        
         return results
     
     def check_service_status(self) -> bool:
@@ -144,17 +235,17 @@ class CarTestDataProcessor:
         try:
             response = requests.get(f"{self.base_url}/api/tags")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 # 便捷函数接口
-def ai_process_test_text(user_input: str, model_name: str = "qwen3:8b") -> Optional[str]:
+def ai_process_test_text(user_input: str, model_name: str = None) -> Optional[str]:
     """
     便捷函数：处理汽车测试文本数据
     
     Args:
         user_input (str): 用户输入的文本
-        model_name (str): 使用的模型名称
+        model_name (str): 使用的模型名称，如果为None则使用配置文件中的模型
         
     Returns:
         Optional[str]: 处理结果
