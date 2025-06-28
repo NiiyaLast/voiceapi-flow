@@ -6,10 +6,45 @@ const demoapp = {
     disabled: false,
     elapsedTime: null,
     logs: [{ idx: 0, text: 'Happily here at ruzhila.cn.' }],
+    // 添加系统状态管理
+    systemStatus: {
+        apiConnection: 'Checking...',
+        apiConnectionActive: false,
+        lastChecked: null
+    },
+    // 添加音频上下文管理
+    currentAudioContext: null,
+    currentMediaSource: null,
 
     
     async init() {
+        // 初始化时检查系统状态
+        await this.checkSystemStatus();
+        // 设置定时检查（每30秒检查一次）
+        setInterval(() => {
+            this.checkSystemStatus();
+        }, 30000);
     },
+
+    // 检查系统状态
+    async checkSystemStatus() {
+        try {
+            const response = await fetch('/api/system/status');
+            const data = await response.json();
+            
+            this.systemStatus.apiConnection = data.api_connection;
+            this.systemStatus.apiConnectionActive = data.api_connection_status;
+            this.systemStatus.lastChecked = new Date().toLocaleTimeString();
+            
+            // console.log('系统状态更新:', this.systemStatus);
+        } catch (error) {
+            console.error('检查系统状态失败:', error);
+            this.systemStatus.apiConnection = 'Error';
+            this.systemStatus.apiConnectionActive = false;
+            this.systemStatus.lastChecked = new Date().toLocaleTimeString();
+        }
+    },
+
     async dotts() {
         let audioContext = new AudioContext({ sampleRate: 16000 })
         await audioContext.audioWorklet.addModule('./audio_process.js')
@@ -50,11 +85,18 @@ const demoapp = {
         this.asrWS.close();
         this.asrWS = null;
         this.recording = false;
+        
+        // 清理音频上下文
+        if (this.currentAudioContext) {
+            await this.currentAudioContext.close();
+            this.currentAudioContext = null;
+        }
+        this.currentMediaSource = null;
+        
         if (this.currentText) {
             this.logs.push({ idx: this.logs.length + 1, text: this.currentText });
         }
         this.currentText = null;
-
     },
 
     async doasr() {
@@ -63,12 +105,15 @@ const demoapp = {
             audio: true,
         };
         console.log('请求麦克风权限');
-        // const mediaStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+        
         const mediaStream = await navigator.mediaDevices.getUserMedia(audioConstraints).catch(err => {
             alert("无法访问麦克风：" + err.message);
             console.error(err);
             return null;
         });
+        
+        if (!mediaStream) return;
+        
         const ws = new WebSocket('/asr');
         let currentMessage = '';
 
@@ -90,19 +135,23 @@ const demoapp = {
             }
         };
 
-        let audioContext = new AudioContext({ sampleRate: 16000 })
-        await audioContext.audioWorklet.addModule('./audio_process.js')
+        // 创建音频上下文并保存引用
+        this.currentAudioContext = new AudioContext({ sampleRate: 16000 });
+        await this.currentAudioContext.audioWorklet.addModule('./audio_process.js');
 
-        const recordNode = new AudioWorkletNode(audioContext, 'record-audio-processor');
-        recordNode.connect(audioContext.destination);
+        const recordNode = new AudioWorkletNode(this.currentAudioContext, 'record-audio-processor');
+        recordNode.connect(this.currentAudioContext.destination);
         recordNode.port.onmessage = (event) => {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 const int16Array = event.data.data;
                 ws.send(int16Array.buffer);
             }
         }
-        const source = audioContext.createMediaStreamSource(mediaStream);
-        source.connect(recordNode);
+        
+        // 创建媒体源并保存引用
+        this.currentMediaSource = this.currentAudioContext.createMediaStreamSource(mediaStream);
+        this.currentMediaSource.connect(recordNode);
+        
         this.asrWS = ws;
         this.recording = true;
     },

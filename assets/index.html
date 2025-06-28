@@ -73,13 +73,42 @@
             align-items: flex-end;
             height: 50px;
             gap: 2px;
+            justify-content: space-between;
         }
         
         .wave-bar {
             width: 4px;
-            background: var(--primary);
+            background: linear-gradient(to top, var(--primary), var(--secondary));
             border-radius: 2px;
-            animation: wave 1.2s ease-in-out infinite;
+            transition: height 0.05s ease-out; /* 更快的过渡以跟上快速变化 */
+            min-height: 4px; /* 减少最小高度让对比更明显 */
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 2px rgba(139, 92, 246, 0.3); /* 添加基础发光 */
+        }
+        
+        .wave-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(to top, 
+                rgba(139, 92, 246, 0.8) 0%, 
+                rgba(14, 165, 233, 0.6) 50%, 
+                rgba(99, 102, 241, 0.4) 100%);
+            opacity: 0;
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+        
+        .recording .wave-bar::after {
+            opacity: 1;
+        }
+        
+        @keyframes glow {
+            0% { opacity: 0.3; }
+            100% { opacity: 0.8; }
         }
         
         @keyframes wave {
@@ -252,6 +281,13 @@
 
         // Initialize Audio Worklet when the page is loaded
         window.addEventListener('load', initAudioWorklet);
+        
+        // Initialize system status checking
+        window.addEventListener('load', async () => {
+            if (window.demoapp) {
+                await window.demoapp.init();
+            }
+        });
     </script>
     <div x-data="{
         recording: false,
@@ -262,17 +298,69 @@
         isProcessing: false,
         elapsedTime: 0,
         timer: null,
+        // 音频分析相关
+        audioContext: null,
+        analyser: null,
+        animationFrame: null,
+        currentVolume: 0,
+        volumeHistory: Array(10).fill(0), // 保存最近10帧的音量历史
+        noiseFloor: 5, // 噪声门限，低于此值视为静音
+        silenceCounter: 0, // 连续静音帧计数器
+        // 噪声质量评估
+        noiseLevel: 'Good',
+        noiseQualityPercent: 75,
+        noiseHistory: Array(20).fill(5), // 保存最近20帧的噪声历史
+        // 添加系统状态
+        systemStatus: {
+            apiConnection: 'Checking...',
+            apiConnectionActive: false,
+            lastChecked: null
+        },
+        
+        async init() {
+            // 初始化系统状态检查
+            await this.checkSystemStatus();
+            // 设置定时检查（每30秒检查一次）
+            setInterval(() => {
+                this.checkSystemStatus();
+            }, 30000);
+        },
+        
+        async checkSystemStatus() {
+            try {
+                const response = await fetch('/api/system/status');
+                const data = await response.json();
+                
+                this.systemStatus.apiConnection = data.api_connection;
+                this.systemStatus.apiConnectionActive = data.api_connection_status;
+                this.systemStatus.lastChecked = new Date().toLocaleTimeString();
+                
+                console.log('系统状态更新:', this.systemStatus);
+            } catch (error) {
+                console.error('检查系统状态失败:', error);
+                this.systemStatus.apiConnection = 'Error';
+                this.systemStatus.apiConnectionActive = false;
+                this.systemStatus.lastChecked = new Date().toLocaleTimeString();
+            }
+        },
+        
         async processWithAI () {
             await window.demoapp.processWithAI.call(this);
         },
         async doasr() {
-        await window.demoapp.doasr.call(this);
-        this.startRecording();
+            await window.demoapp.doasr.call(this);
+            this.startRecording();
+            
+            // 设置音频分析器
+            await this.setupAudioAnalyzer();
         },
         
         async stopasr() {
             await window.demoapp.stopasr.call(this);
             this.stopRecording();
+            
+            // 停止音频分析
+            this.stopAudioAnalyzer();
         },
 
         startRecording() {
@@ -322,18 +410,230 @@
         },
         
         startVisualization() {
-            this.visInterval = setInterval(() => {
-                this.visualization = this.visualization.map(() => 
-                    Math.floor(Math.random() * 40) + 10
-                );
-            }, 100);
+            // 如果有音频分析器，使用实时数据；否则使用模拟数据
+            if (this.analyser) {
+                this.startRealTimeVisualization();
+            } else {
+                this.visInterval = setInterval(() => {
+                    this.visualization = this.visualization.map(() => 
+                        Math.floor(Math.random() * 40) + 10
+                    );
+                }, 100);
+            }
         },
         
         stopVisualization() {
-            clearInterval(this.visInterval);
+            if (this.animationFrame) {
+                cancelAnimationFrame(this.animationFrame);
+                this.animationFrame = null;
+            }
+            if (this.visInterval) {
+                clearInterval(this.visInterval);
+                this.visInterval = null;
+            }
             this.visualization = Array(20).fill(20);
+        },
+        
+        async setupAudioAnalyzer() {
+            try {
+                // 等待一下让 doasr 创建 audioContext
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // 尝试获取全局的 audioContext（由 app.js 中的 doasr 创建）
+                if (window.demoapp && window.demoapp.currentAudioContext) {
+                    this.audioContext = window.demoapp.currentAudioContext;
+                    this.analyser = this.audioContext.createAnalyser();
+                    
+                    // 优化分析器配置以获得更敏感的响应
+                    this.analyser.fftSize = 256; // 增加FFT大小以获得更多频率分辨率
+                    this.analyser.smoothingTimeConstant = 0.3; // 减少平滑以获得更快响应
+                    this.analyser.minDecibels = -90; // 降低最小分贝阈值
+                    this.analyser.maxDecibels = -10; // 提高最大分贝阈值
+                    
+                    // 如果有音频源，连接分析器
+                    if (window.demoapp.currentMediaSource) {
+                        window.demoapp.currentMediaSource.connect(this.analyser);
+                        console.log('音频分析器设置成功 - 优化参数');
+                        console.log('FFT Size:', this.analyser.fftSize);
+                        console.log('Frequency Bin Count:', this.analyser.frequencyBinCount);
+                    }
+                } else {
+                    console.log('AudioContext 未就绪，使用模拟数据');
+                }
+            } catch (error) {
+                console.error('设置音频分析器失败:', error);
+            }
+        },
+        
+        startRealTimeVisualization() {
+            if (!this.analyser) return;
+            
+            const bufferLength = this.analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            console.log('开始实时可视化 - Buffer Length:', bufferLength);
+            
+            const updateVisualization = () => {
+                if (!this.recording || !this.analyser) return;
+                
+                this.analyser.getByteFrequencyData(dataArray);
+                
+                // 计算整体音量级别
+                let totalEnergy = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    totalEnergy += dataArray[i];
+                }
+                this.currentVolume = (totalEnergy / bufferLength / 255) * 100;
+                
+                // 更新音量历史
+                this.volumeHistory.shift();
+                this.volumeHistory.push(this.currentVolume);
+                const avgVolume = this.volumeHistory.reduce((a, b) => a + b, 0) / this.volumeHistory.length;
+                
+                // 动态调整噪声门限（学习环境噪声）
+                if (avgVolume < this.noiseFloor && this.silenceCounter < 30) {
+                    this.noiseFloor = Math.max(2, this.noiseFloor * 0.95 + avgVolume * 0.05);
+                }
+                
+                // 检测是否为静音（使用噪声门限 + 缓冲区）
+                const isSilent = avgVolume < (this.noiseFloor * 1.5);
+                
+                if (isSilent) {
+                    this.silenceCounter++;
+                } else {
+                    this.silenceCounter = 0;
+                }
+                
+                // 如果连续静音超过10帧，显示静态波形
+                if (this.silenceCounter > 10) {
+                    this.visualization = Array(20).fill(6); // 静音时的固定低水平
+                    this.animationFrame = requestAnimationFrame(updateVisualization);
+                    return;
+                }
+                
+                // 有声音时才进行频谱分析
+                const newVisualization = [];
+                const voiceRange = Math.floor(bufferLength * 0.7);
+                const groupSize = Math.max(1, Math.floor(voiceRange / 20));
+                
+                for (let i = 0; i < 20; i++) {
+                    let max = 0;
+                    let sum = 0;
+                    let count = 0;
+                    
+                    const start = i * groupSize;
+                    const end = Math.min(start + groupSize, voiceRange);
+                    
+                    for (let j = start; j < end; j++) {
+                        const value = dataArray[j];
+                        sum += value;
+                        max = Math.max(max, value);
+                        count++;
+                    }
+                    
+                    if (count > 0) {
+                        const average = sum / count;
+                        let enhanced = Math.max(average, max * 0.6);
+                        
+                        // 减去噪声基线
+                        enhanced = Math.max(0, enhanced - (this.noiseFloor * 2.55));
+                        
+                        // 更保守的动态增益
+                        const dynamicGain = Math.min(2.5, Math.max(1.2, 15 / (avgVolume + 1)));
+                        enhanced = enhanced * dynamicGain;
+                        
+                        // 应用对数缩放
+                        let percentage = (enhanced / 255) * 100;
+                        
+                        // 非线性增强（更温和）
+                        if (percentage > 0) {
+                            percentage = Math.pow(percentage / 100, 0.7) * 100;
+                            percentage = Math.min(100, percentage);
+                        }
+                        
+                        // 最小高度设置
+                        percentage = Math.max(8, percentage);
+                        newVisualization.push(percentage);
+                    } else {
+                        newVisualization.push(8);
+                    }
+                }
+                
+                // 调试信息
+                if (Math.random() < 0.02) {
+                    console.log(`音频状态 - 当前音量: ${this.currentVolume.toFixed(1)}%, 平均: ${avgVolume.toFixed(1)}%, 噪声门限: ${this.noiseFloor.toFixed(1)}%, 静音计数: ${this.silenceCounter}, 是否静音: ${isSilent}`);
+                }
+                
+                // 更新噪声质量评估
+                this.updateNoiseQuality();
+                
+                this.visualization = newVisualization;
+                this.animationFrame = requestAnimationFrame(updateVisualization);
+            };
+            
+            updateVisualization();
+        },
+        
+        // 更新噪声质量评估
+        updateNoiseQuality() {
+            // 更新噪声历史记录
+            this.noiseHistory.shift();
+            this.noiseHistory.push(this.noiseFloor);
+            
+            // 计算平均噪声水平
+            const avgNoise = this.noiseHistory.reduce((sum, noise) => sum + noise, 0) / this.noiseHistory.length;
+            
+            // 根据平均噪声水平确定质量等级
+            if (avgNoise <= 3) {
+                this.noiseLevel = 'Excellent';
+                this.noiseQualityPercent = 95;
+            } else if (avgNoise <= 6) {
+                this.noiseLevel = 'Good';
+                this.noiseQualityPercent = 80;
+            } else if (avgNoise <= 12) {
+                this.noiseLevel = 'Fair';
+                this.noiseQualityPercent = 60;
+            } else {
+                this.noiseLevel = 'Poor';
+                this.noiseQualityPercent = 30;
+            }
+            
+            // 根据噪声变化调整百分比（噪声越低，质量越高）
+            const noiseVariance = this.calculateNoiseVariance();
+            if (noiseVariance > 5) {
+                // 噪声变化大，降低评分
+                this.noiseQualityPercent = Math.max(20, this.noiseQualityPercent - 10);
+            }
+        },
+        
+        // 计算噪声变化幅度
+        calculateNoiseVariance() {
+            if (this.noiseHistory.length < 2) return 0;
+            
+            const mean = this.noiseHistory.reduce((sum, noise) => sum + noise, 0) / this.noiseHistory.length;
+            const variance = this.noiseHistory.reduce((sum, noise) => sum + Math.pow(noise - mean, 2), 0) / this.noiseHistory.length;
+            return Math.sqrt(variance);
+        },
+        
+        stopAudioAnalyzer() {
+            if (this.animationFrame) {
+                cancelAnimationFrame(this.animationFrame);
+                this.animationFrame = null;
+            }
+            
+            if (this.analyser && window.demoapp && window.demoapp.currentMediaSource) {
+                try {
+                    window.demoapp.currentMediaSource.disconnect(this.analyser);
+                } catch (error) {
+                    console.log('断开音频分析器连接时出错:', error);
+                }
+            }
+            
+            this.analyser = null;
+            this.audioContext = null;
         }
     }"
+    x-init="init()"
     class="flex-grow">
         <header class="glass-card py-4 px-5 lg:p-4 lg:px-10 text-white sticky top-0 z-50 border-b border-gray-800">
             <div class="flex w-full justify-between items-center">
@@ -374,10 +674,18 @@
                             <div>
                                 <div class="flex justify-between mb-2">
                                     <span class="text-gray-400">API Connection</span>
-                                    <span class="text-green-400 font-medium">Active</span>
+                                    <span :class="systemStatus.apiConnectionActive ? 'text-green-400' : 'text-red-400'" 
+                                          class="font-medium" 
+                                          x-text="systemStatus.apiConnection">Checking...</span>
                                 </div>
                                 <div class="w-full bg-gray-700 rounded-full h-2">
-                                    <div class="bg-green-500 h-2 rounded-full w-full"></div>
+                                    <div :class="systemStatus.apiConnectionActive ? 'bg-green-500' : 'bg-red-500'" 
+                                         class="h-2 rounded-full transition-all duration-300" 
+                                         :style="systemStatus.apiConnectionActive ? 'width: 100%' : 'width: 0%'"></div>
+                                </div>
+                                <div class="flex justify-between mt-1">
+                                    <span class="text-xs text-gray-500">Ollama Service</span>
+                                    <span class="text-xs text-gray-500" x-text="systemStatus.lastChecked ? 'Last: ' + systemStatus.lastChecked : ''"></span>
                                 </div>
                             </div>
                             
@@ -393,21 +701,50 @@
                             
                             <div>
                                 <div class="flex justify-between mb-2">
-                                    <span class="text-gray-400">Audio Quality</span>
-                                    <span class="text-cyan-400 font-medium">Excellent</span>
+                                    <span class="text-gray-400">Environment Noise</span>
+                                    <span class="font-medium" 
+                                          :class="{
+                                              'text-green-400': noiseLevel === 'Excellent',
+                                              'text-cyan-400': noiseLevel === 'Good',
+                                              'text-yellow-400': noiseLevel === 'Fair',
+                                              'text-red-400': noiseLevel === 'Poor',
+                                              'text-gray-400': !recording
+                                          }"
+                                          x-text="recording ? noiseLevel : 'Ready'"></span>
                                 </div>
                                 <div class="w-full bg-gray-700 rounded-full h-2">
-                                    <div class="bg-cyan-500 h-2 rounded-full" style="width: 92%"></div>
+                                    <div class="h-2 rounded-full transition-all duration-300" 
+                                         :class="{
+                                             'bg-green-500': recording && noiseLevel === 'Excellent',
+                                             'bg-cyan-500': recording && noiseLevel === 'Good',
+                                             'bg-yellow-500': recording && noiseLevel === 'Fair',
+                                             'bg-red-500': recording && noiseLevel === 'Poor',
+                                             'bg-gray-500': !recording
+                                         }"
+                                         :style="`width: ${recording ? noiseQualityPercent : 50}%`"></div>
+                                </div>
+                                <div class="mt-1 text-xs text-gray-500" x-show="recording">
+                                    <span x-text="'Avg Noise: ' + (noiseHistory.reduce((a,b) => a+b, 0) / noiseHistory.length).toFixed(1) + '%'"></span>
                                 </div>
                             </div>
                         </div>
                         
                         <div class="mt-8 pt-6 border-t border-gray-700">
                             <h3 class="font-medium mb-3">Audio Visualization</h3>
-                            <div class="waveform h-16 bg-gray-800 rounded-lg p-3">
+                            <div class="waveform h-16 bg-gray-800 rounded-lg p-3" 
+                                 :class="{ 'recording': recording }">
                                 <template x-for="(value, index) in visualization">
                                     <div class="wave-bar" :style="`height: ${value}%`"></div>
                                 </template>
+                            </div>
+                            <div class="mt-2 text-xs text-gray-500 text-center">
+                                <span x-text="recording ? (silenceCounter > 10 ? 'Silent - Noise Suppressed' : 'Real-time Audio Spectrum') : 'Ready to Record'"></span>
+                                <span x-show="recording && currentVolume > 0" 
+                                      x-text="' • Vol: ' + currentVolume.toFixed(0) + '%'" 
+                                      class="text-cyan-400"></span>
+                                <span x-show="recording && noiseFloor > 0" 
+                                      x-text="' • Noise: ' + noiseFloor.toFixed(1) + '%'" 
+                                      class="text-yellow-400"></span>
                             </div>
                         </div>
                         
@@ -494,42 +831,9 @@
                                                 </span>
                                                 Recording - Click to stop
                                             </p>
-                                            
-                                            <!-- <div class="mt-4 w-full max-w-md">
-                                                <div class="text-center text-sm text-gray-400 mb-2">Speech detected</div>
-                                                <div class="h-2 bg-gray-800 rounded-full overflow-hidden">
-                                                    <div class="h-full bg-indigo-500 rounded-full" 
-                                                        :style="`width: ${audioLevel}%`"
-                                                        x-data="{ audioLevel: 20 }"
-                                                        x-init="setInterval(() => { audioLevel = 10 + Math.random() * 90; }, 200)"></div>
-                                                </div>
-                                            </div> -->
                                         </div>
                                     </template>
                                 </div>
-                                <!-- <template x-if="!recording">
-                                    <div class="flex flex-col gap-y-4 items-center justify-center mt-4">
-                                        <p @click="doasr"
-                                            class="mt-2 border border-gray-100 rounded-full duration-300 hover:scale-105 hover:border-gray-400">
-                                            <img src="./images/record.svg" alt="" class="w-14 h-14 mx-auto cursor-pointer">
-                                        </p>
-                                        <p class="text-gray-600">Click to record !</p>
-                                    </div>
-                                </template>
-
-                                <template x-if="recording">
-                                    <div class="flex flex-col items-center justify-center gap-y-4 mt-4">
-
-                                        <p @click="stopasr"
-                                            class="mt-2 border border-red-100 rounded-full duration-300 hover:scale-105  hover:border-red-400">
-                                            <img src="./images/speaking.svg" alt=""
-                                                class="w-14 h-14 mx-auto cursor-pointer animate-ping">
-                                        </p>
-                                        <div class="flex items-center text-gray-600 gap-x-4">
-                                            <p>Click to stop recording !</p>
-                                        </div>
-                                    </div>
-                                </template> -->
                             </div>
                         </div>
                     </div>
