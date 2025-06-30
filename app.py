@@ -297,7 +297,7 @@ async def get_system_status():
     """
     try:
         # 导入AI处理器并检查ollama服务状态
-        from ai_models.ai_api import CarTestDataProcessor
+        from ai_service.ai_api import CarTestDataProcessor
         processor = CarTestDataProcessor()
         ollama_status = processor.check_service_status()
         

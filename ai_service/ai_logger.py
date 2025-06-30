@@ -21,7 +21,7 @@ class AIProcessLogger:
     
     def _get_log_directory(self) -> str:
         """获取日志目录路径"""
-        # 获取当前文件所在目录（ai_models目录）
+        # 获取当前文件所在目录（ai_service目录）
         current_dir = os.path.dirname(os.path.abspath(__file__))
         log_dir = os.path.join(current_dir, "ai_process_logs")
         

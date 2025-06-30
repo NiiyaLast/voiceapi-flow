@@ -555,7 +555,7 @@ server:
 
 ```bash
 # 查看AI处理日志
-tail -f ai_models/ai_process_logs/ai_process_*.log
+tail -f ai_service/ai_process_logs/ai_process_*.log
 
 # 查看系统日志
 tail -f voiceapi-flow.log

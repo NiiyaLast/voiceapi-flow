@@ -11,7 +11,7 @@ import logging
 
 # 导入配置管理和相关模块
 from config_manager import get_config
-from ai_models.ai_api import ai_process_test_text 
+from ai_service.ai_api import ai_process_test_text 
 from toexcel.toexcel import export_to_excel, export_to_excel_sheetn
 
 # 获取日志实例
