@@ -4,11 +4,7 @@ from typing import Optional
 import os
 import time
 # 添加配置管理导入
-try:
-    from config_manager import get_config
-    config = get_config()
-except ImportError:
-    config = None
+from config_manager import get_config
 
 # 导入AI日志模块
 try:
@@ -22,17 +18,33 @@ class CarTestDataProcessor:
     """汽车测试数据处理器"""
     
     def __init__(self, model_name: str = None, base_url: str = None):
-        # 优先使用配置文件的设置，然后是传入参数，最后是默认值
-        if config:
-            self.model_name = model_name or config.ai.model_name
-            self.base_url = base_url or config.ai.api_url
-            self.timeout = config.ai.timeout
-            self.max_retries = config.ai.max_retries
-        # else:
-        #     self.model_name = model_name or "qwen3:8b"
-        #     self.base_url = base_url or "http://localhost:11434"
-        #     self.timeout = 30
-        #     self.max_retries = 3
+        # 获取配置，如果失败则抛出异常
+        try:
+            config = get_config()
+        except Exception as e:
+            raise RuntimeError(f"无法加载配置文件，项目必须依赖配置文件才能运行: {e}")
+        
+        # 检查必要的配置项
+        if not hasattr(config, 'ai'):
+            raise RuntimeError("配置文件中缺少ai配置段")
+        
+        # 从配置文件读取参数，不提供默认值
+        self.model_name = model_name or config.ai.model_name
+        self.base_url = base_url or config.ai.api_url
+        self.timeout = config.ai.timeout
+        self.max_retries = config.ai.max_retries
+        
+        # 读取AI推理参数，如果配置文件中没有则抛出异常
+        if not hasattr(config.ai, 'options'):
+            raise RuntimeError("配置文件中缺少ai.options配置，请在config.yaml中添加AI推理参数")
+        
+        self.ai_options = config.ai.options
+        
+        # 验证关键配置项
+        if not self.model_name:
+            raise RuntimeError("配置文件中缺少model_name")
+        if not self.base_url:
+            raise RuntimeError("配置文件中缺少api_url")
             
         self.api_url = f"{self.base_url}/api/chat"
         
@@ -42,32 +54,40 @@ class CarTestDataProcessor:
 
     def _load_system_prompt(self, prompt_file: str) -> str:
         """
-        从文件读取系统提示词
+        从文件读取系统提示词，如果文件不存在则抛出异常
         
         Args:
             prompt_file (str): 提示词文件名
             
         Returns:
             str: 提示词内容
+            
+        Raises:
+            RuntimeError: 如果提示词文件不存在或读取失败
         """
         try:
             # 获取当前文件所在目录
             current_dir = os.path.dirname(os.path.abspath(__file__))
             prompt_path = os.path.join(current_dir, prompt_file)
             
+            # 检查文件是否存在
+            if not os.path.exists(prompt_path):
+                raise RuntimeError(f"系统提示词文件不存在: {prompt_path}")
+            
             # 读取提示词文件
             with open(prompt_path, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
             
-            # print(f"成功加载提示词文件: {prompt_path}")
+            # 检查内容是否为空
+            if not content:
+                raise RuntimeError(f"系统提示词文件为空: {prompt_path}")
+            
             return content
             
         except FileNotFoundError:
-            print(f"提示词文件 {prompt_file} 不存在，使用默认提示词")
-            return self._get_default_prompt()
+            raise RuntimeError(f"系统提示词文件不存在: {prompt_file}")
         except Exception as e:
-            print(f"读取提示词文件时出错: {e}，使用默认提示词")
-            return self._get_default_prompt()
+            raise RuntimeError(f"读取系统提示词文件时出错: {e}")
 
     def _chat_with_ollama(self, prompt: str, stream: bool = False) -> Optional[str]:
         """
@@ -82,12 +102,7 @@ class CarTestDataProcessor:
                 }
             ],
             "stream": stream,
-            "options": {
-                "temperature": 0.1,  # 降低随机性，提高一致性
-                "top_p": 0.7,  # 使用 nucleus sampling
-                "top_k": 40, # 限制采样范围
-                "num_predict": 512,  # 限制输出长度
-            },
+            "options": self.ai_options,
             
         }
         
@@ -136,7 +151,7 @@ class CarTestDataProcessor:
         start_time = time.time()
         
         # 构建完整的提示词
-        full_prompt = f"{self.system_prompt}\n\n用户输入：\n{user_input.strip()}/no_think"
+        full_prompt = f"{self.system_prompt}\n\n\"input\": \"{user_input.strip()}\" /no_think"
         
         try:
             # 调用模型处理
@@ -158,8 +173,26 @@ class CarTestDataProcessor:
                 )
                 return None
                 
-            # 清理结果
-            result = result.strip().replace("<think>", "").replace("</think>", "")
+            # 清理结果 - 移除思考标记和代码块标记
+            result = result.strip()
+            result = result.replace("<think>", "").replace("</think>", "")
+            
+            # 清理Markdown代码块标记
+            if result.startswith("```json"):
+                result = result[7:]  # 移除开头的```json
+            if result.startswith("```"):
+                result = result[3:]   # 移除开头的```
+            if result.endswith("```"):
+                result = result[:-3]  # 移除末尾的```
+            
+            # 移除解释性文本，只保留JSON部分
+            import re
+            # 尝试提取JSON对象
+            json_match = re.search(r'\{.*\}', result, re.DOTALL)
+            if json_match:
+                result = json_match.group(0)
+            
+            result = result.strip()
             
             # 记录成功日志
             log_ai_process(

@@ -20,7 +20,11 @@ app = FastAPI()
 logger = logging.getLogger(__file__)
 
 # 获取配置实例（根据配置文件设置决定是否启用自动重载）
-config = get_config()
+try:
+    config = get_config()
+except Exception as e:
+    logger.error(f"无法加载配置文件，项目必须依赖配置文件才能运行: {e}")
+    raise RuntimeError(f"无法加载配置文件，项目必须依赖配置文件才能运行: {e}")
 
 # 获取最新待处理的Excel文件
 def get_latest_excel_file():
