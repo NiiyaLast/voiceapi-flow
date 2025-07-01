@@ -6,6 +6,9 @@ import os
 import logging
 from datetime import datetime
 from typing import Optional, Any
+# 导入配置管理模块
+from config_manager import get_config
+
 
 # 获取日志实例
 logger = logging.getLogger(__name__)
@@ -17,7 +20,25 @@ class AIProcessLogger:
         self.log_dir = self._get_log_directory()
         self.current_log_file = None
         self.session_start_time = None
+        self.show_full_content = self._should_show_full_content()
         self._setup_log_file()
+    
+    def _should_show_full_content(self) -> bool:
+        """
+        根据配置文件中的日志级别决定是否显示完整内容
+        
+        Returns:
+            bool: DEBUG级别时返回True，其他级别返回False
+        """
+        try:
+            config = get_config()
+            if config and hasattr(config, 'logging') and hasattr(config.logging, 'level'):
+                log_level = config.logging.level.upper()
+                return log_level == "DEBUG"
+            return False
+        except Exception as e:
+            logger.warning(f"获取日志级别配置失败，使用默认截断模式: {e}")
+            return False
     
     def _get_log_directory(self) -> str:
         """获取日志目录路径"""
@@ -82,14 +103,24 @@ class AIProcessLogger:
                 f.write(f"模型: {model_name}\n")
                 f.write(f"耗时: {processing_time_ms:.1f}ms\n")
                 
-                # 原始输入（限制长度避免日志过大）
-                original_preview = original_text[:100] + '...' if len(original_text) > 100 else original_text
-                f.write(f"原始输入: {original_preview}\n")
+                # 根据日志级别决定是否显示完整内容
+                if self.show_full_content:
+                    # DEBUG级别：显示完整内容
+                    f.write(f"原始输入: {original_text}\n")
+                else:
+                    # 其他级别：限制长度避免日志过大
+                    original_preview = original_text[:100] + '...' if len(original_text) > 100 else original_text
+                    f.write(f"原始输入: {original_preview}\n")
                 
                 # AI处理结果
                 if ai_result:
-                    result_preview = ai_result.strip()[:200] + '...' if len(ai_result.strip()) > 200 else ai_result.strip()
-                    f.write(f"AI处理结果: {result_preview}\n")
+                    if self.show_full_content:
+                        # DEBUG级别：显示完整结果
+                        f.write(f"AI处理结果: {ai_result.strip()}\n")
+                    else:
+                        # 其他级别：限制长度
+                        result_preview = ai_result.strip()[:200] + '...' if len(ai_result.strip()) > 200 else ai_result.strip()
+                        f.write(f"AI处理结果: {result_preview}\n")
                 else:
                     f.write("AI处理结果: None\n")
                 
