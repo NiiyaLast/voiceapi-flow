@@ -23,7 +23,9 @@ TASK_CONFIG_MISSING = "任务配置文件缺失"
 class AIConfig:
     """AI配置"""
     enabled: bool
+    provider: str
     api_url: str
+    api_key: Optional[str]
     model_name: str
     timeout: int
     max_retries: int
@@ -167,7 +169,7 @@ class Config:
             
             # 验证AI配置中的必要字段
             ai_config = self._config_data.get('ai', {})
-            required_ai_fields = ['api_url', 'model_name', 'timeout', 'max_retries', 'options']
+            required_ai_fields = ['provider', 'api_url', 'model_name', 'timeout', 'max_retries', 'options']
             for field in required_ai_fields:
                 if field not in ai_config:
                     error_msg = self._get_error_message(
@@ -175,6 +177,15 @@ class Config:
                         f"配置文件中缺少必要的AI配置字段: ai.{field}"
                     )
                     raise ValueError(error_msg)
+                
+            # 验证provider字段
+            provider = ai_config.get('provider', '').lower()
+            if provider not in ['ollama', 'openai', 'deepseek']:
+                raise ValueError(f"不支持的AI提供商: {provider}，支持的选项: ollama, openai, deepseek")
+            
+            # 验证外部模型的API密钥
+            if provider in ['openai', 'deepseek'] and not ai_config.get('api_key'):
+                raise ValueError(f"使用{provider}时必须配置api_key")
                 
             # 更新最后修改时间
             self._last_modified = os.path.getmtime(self.config_path)
@@ -239,7 +250,7 @@ class Config:
             raise ValueError(error_msg)
             
         # 检查必要字段
-        required_fields = ['enabled', 'api_url', 'model_name', 'timeout', 'max_retries', 'options']
+        required_fields = ['enabled', 'provider', 'api_url', 'model_name', 'timeout', 'max_retries', 'options']
         for field in required_fields:
             if field not in ai_data:
                 error_msg = self._get_error_message(
@@ -250,7 +261,9 @@ class Config:
         
         return AIConfig(
             enabled=ai_data['enabled'],
+            provider=ai_data['provider'],
             api_url=ai_data['api_url'],
+            api_key=ai_data.get('api_key'),
             model_name=ai_data['model_name'],
             timeout=ai_data['timeout'],
             max_retries=ai_data['max_retries'],
