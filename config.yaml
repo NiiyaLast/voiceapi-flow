@@ -1,15 +1,21 @@
 ai:
-  api_url: http://localhost:11434
+  # provider: ollama   
+  provider: deepseek      # 支持：ollama, openai, deepseek
+  # api_url: http://localhost:11434
+  api_url: https://api.deepseek.com/v1
+  api_key: null           # 外部模型API密钥，ollama不需要
   enabled: true
   max_retries: 3
-  model_name: qwen3:1.7b
+  # model_name: qwen3:1.7b
+  model_name: deepseek-chat
   timeout: 60
   # AI模型推理参数
   options:
     temperature: 0.0      # 随机性控制，0.0=完全确定性，2.0=高随机性
     top_p: 0.3           # 核采样，控制候选词概率范围
     top_k: 10            # 限制每步考虑的候选词数量
-    num_predict: 256     # 限制输出的最大token数量
+    num_predict: 512     # 限制输出的最大token数量
+    max_tokens: 512      # 外部模型使用（对应num_predict）
 asr:
   language: zh
   model: fireredasr
