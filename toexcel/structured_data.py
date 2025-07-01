@@ -4,7 +4,7 @@
 """
 import logging
 from typing import List, Dict
-from .structured_data_components import DataPipeline
+from .data_pipeline import DataPipeline
 
 logger = logging.getLogger(__name__)
 
