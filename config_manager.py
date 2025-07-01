@@ -13,60 +13,67 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+# 错误信息常量
+CONFIG_CONTENT_MISSING = "配置文件内容缺失"
+CONFIG_FORMAT_ERROR = "配置文件格式错误"
+CONFIG_FILE_NOT_EXISTS = "配置文件不存在"
+TASK_CONFIG_MISSING = "任务配置文件缺失"
+
 @dataclass
 class AIConfig:
     """AI配置"""
-    enabled: bool = True
-    api_url: str = "http://localhost:11434"
-    model_name: str = "qwen2.5:7b"
-    timeout: int = 30
-    max_retries: int = 3
+    enabled: bool
+    api_url: str
+    model_name: str
+    timeout: int
+    max_retries: int
+    options: Optional[Dict[str, Any]]
 
 @dataclass
 class ServerConfig:
     """服务器配置"""
-    host: str = "localhost"
-    port: int = 8000
-    debug: bool = False
-    auto_reload_config: bool = False
+    host: str
+    port: int
+    debug: bool
+    auto_reload_config: bool
 
 @dataclass
 class StorageConfig:
     """存储配置"""
-    download_dir: str = "./download"
-    models_dir: str = "./models"
-    export_excel: bool = True
-    auto_backup: bool = True
+    download_dir: str
+    models_dir: str
+    export_excel: bool
+    auto_backup: bool
 
 @dataclass
 class ASRConfig:
     """ASR配置"""
-    provider: str = "cpu"
-    model: str = "fireredasr"
-    language: str = "zh"
-    sample_rate: int = 16000
+    provider: str
+    model: str
+    language: str
+    sample_rate: int
 
 @dataclass
 class TTSConfig:
     """TTS配置"""
-    provider: str = "cpu"
-    model: str = "vits-zh-hf-theresa"
-    speed: float = 1.0
-    chunk_size: int = 1024
+    provider: str
+    model: str
+    speed: float
+    chunk_size: int
 
 @dataclass
 class LoggingConfig:
     """日志配置"""
-    level: str = "INFO"
-    format: str = "%(levelname)s: %(asctime)s %(name)s:%(lineno)s %(message)s"
-    log_file: Optional[str] = None
+    level: str
+    format: str
+    log_file: Optional[str]
 
 @dataclass
 class ProcessingConfig:
     """处理配置"""
-    threads: int = 2
-    batch_size: int = 100
-    enable_concurrent: bool = True
+    threads: int
+    batch_size: int
+    enable_concurrent: bool
 
 @dataclass
 class TaskConfig:
@@ -80,10 +87,10 @@ class TaskConfig:
 @dataclass
 class DataProcessingConfig:
     """数据处理配置"""
-    current_task_config: str = "driving_evaluation"
-    ai_processing_enabled: bool = True
-    ai_timeout_per_record: int = 30
-    ai_retry_failed_records: bool = False
+    current_task_config: str
+    ai_processing_enabled: bool
+    ai_timeout_per_record: int
+    ai_retry_failed_records: bool
     
     # 当前任务配置（运行时加载）
     task_config: Optional[TaskConfig] = None
@@ -105,17 +112,69 @@ class Config:
         
         if self._auto_reload:
             self._start_file_watcher()
+    
+    def _get_error_message(self, simple_msg: str, detailed_msg: str) -> str:
+        """根据配置文件中的日志级别返回适当的错误信息"""
+        try:
+            # 尝试从配置数据中获取日志级别
+            if self._config_data and 'logging' in self._config_data:
+                log_level_str = self._config_data['logging'].get('level', 'INFO')
+                # 将字符串级别转换为数字级别
+                log_level = getattr(logging, log_level_str.upper(), logging.INFO)
+                
+                # DEBUG级别显示详细信息，其他级别显示简单信息
+                if log_level <= logging.DEBUG:
+                    return detailed_msg
+                else:
+                    return simple_msg
+            else:
+                # 如果配置还未加载，默认返回简单信息
+                return simple_msg
+        except Exception:
+            # 出现任何异常时，返回简单信息
+            return simple_msg
         
     def load(self) -> None:
         """加载配置文件"""
         try:
             if not os.path.exists(self.config_path):
-                logger.warning(f"配置文件不存在: {self.config_path}，将使用默认配置")
-                self._create_default_config()
-                return
+                error_msg = self._get_error_message(
+                    CONFIG_FILE_NOT_EXISTS,
+                    f"配置文件不存在: {self.config_path}，项目必须依赖配置文件才能运行"
+                )
+                raise FileNotFoundError(error_msg)
                 
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self._config_data = yaml.safe_load(f) or {}
+                
+            # 检查配置文件是否为空
+            if not self._config_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件为空: {self.config_path}"
+                )
+                raise ValueError(error_msg)
+                
+            # 验证必要的配置段是否存在
+            required_sections = ['ai', 'server', 'storage', 'asr', 'tts', 'logging', 'processing', 'data_processing']
+            for section in required_sections:
+                if section not in self._config_data:
+                    error_msg = self._get_error_message(
+                        CONFIG_CONTENT_MISSING,
+                        f"配置文件中缺少必要的配置段: {section}"
+                    )
+                    raise ValueError(error_msg)
+            
+            # 验证AI配置中的必要字段
+            ai_config = self._config_data.get('ai', {})
+            required_ai_fields = ['api_url', 'model_name', 'timeout', 'max_retries', 'options']
+            for field in required_ai_fields:
+                if field not in ai_config:
+                    error_msg = self._get_error_message(
+                        CONFIG_CONTENT_MISSING,
+                        f"配置文件中缺少必要的AI配置字段: ai.{field}"
+                    )
+                    raise ValueError(error_msg)
                 
             # 更新最后修改时间
             self._last_modified = os.path.getmtime(self.config_path)
@@ -123,90 +182,14 @@ class Config:
             
         except yaml.YAMLError as e:
             logger.error(f"配置文件格式错误: {e}")
-            raise ValueError(f"配置文件格式错误: {e}")
+            error_msg = self._get_error_message(
+                CONFIG_FORMAT_ERROR,
+                f"配置文件格式错误: {e}"
+            )
+            raise ValueError(error_msg)
         except Exception as e:
             logger.error(f"加载配置文件失败: {e}")
             raise
-    
-    def _create_default_config(self) -> None:
-        """创建默认配置"""
-        default_config = {
-            'ai': {
-                'enabled': True,
-                'api_url': 'http://localhost:11434',
-                'model_name': 'qwen2.5:7b',
-                'timeout': 30,
-                'max_retries': 3
-            },
-            'server': {
-                'host': 'localhost',
-                'port': 8000,
-                'debug': False,
-                'auto_reload_config': False
-            },
-            'storage': {
-                'download_dir': './download',
-                'models_dir': './models',
-                'export_excel': True,
-                'auto_backup': True
-            },
-            'asr': {
-                'provider': 'cpu',
-                'model': 'fireredasr',
-                'language': 'zh',
-                'sample_rate': 16000
-            },
-            'tts': {
-                'provider': 'cpu',
-                'model': 'vits-zh-hf-theresa',
-                'speed': 1.0,
-                'chunk_size': 1024
-            },
-            'logging': {
-                'level': 'INFO',
-                'format': '%(levelname)s: %(asctime)s %(name)s:%(lineno)s %(message)s',
-                'log_file': None
-            },
-            'processing': {
-                'threads': 2,
-                'batch_size': 100,
-                'enable_concurrent': True
-            },
-            'data_processing': {
-                'score_mapping': {
-                    '压力性': 'Mental_Load',
-                    '可预测性': 'Predicatabl', 
-                    '响应性': 'Timely_Response',
-                    '舒适性': 'Comfort',
-                    '效率性': 'Efficiency',
-                    '功能性': 'Features',
-                    '安全性': 'safety'
-                },
-                'rating_thresholds': {
-                    'excellent': 8.0,
-                    'good': 7.0,
-                    'fair': 5.0
-                },
-                'takeover_keywords': {
-                    '危险接管': ['危险接管', '紧急接管', '安全接管'],
-                    '车机接管': ['车机接管', '系统接管', '自动接管'],
-                    '人为接管': ['人为接管', '手动接管', '优化接管']
-                },
-                'excel_export': {
-                    'enabled': True,
-                    'include_statistics': True,
-                    'default_columns': ['time', 'comment', 'function', 'Mental_Load', 'Predicatabl', 'Timely_Response', 'Comfort', 'Efficiency', 'Features', 'safety', '是否剪辑']
-                },
-                'ai_processing': {
-                    'enabled': True,
-                    'timeout_per_record': 30,
-                    'retry_failed_records': False
-                }
-            }
-        }
-        
-        self._config_data = default_config
-        self.save()
     
     def save(self) -> None:
         """保存配置到文件"""
@@ -247,88 +230,218 @@ class Config:
     @property
     def ai(self) -> AIConfig:
         """AI配置"""
-        ai_data = self._config_data.get('ai', {})
+        ai_data = self._config_data.get('ai')
+        if not ai_data:
+            error_msg = self._get_error_message(
+                CONFIG_CONTENT_MISSING,
+                "配置文件中缺少ai配置段"
+            )
+            raise ValueError(error_msg)
+            
+        # 检查必要字段
+        required_fields = ['enabled', 'api_url', 'model_name', 'timeout', 'max_retries', 'options']
+        for field in required_fields:
+            if field not in ai_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件中缺少必要的AI配置字段: ai.{field}"
+                )
+                raise ValueError(error_msg)
+        
         return AIConfig(
-            enabled=ai_data.get('enabled', True),
-            api_url=ai_data.get('api_url', 'http://localhost:11434'),
-            model_name=ai_data.get('model_name', 'qwen2.5:7b'),
-            timeout=ai_data.get('timeout', 30),
-            max_retries=ai_data.get('max_retries', 3)
+            enabled=ai_data['enabled'],
+            api_url=ai_data['api_url'],
+            model_name=ai_data['model_name'],
+            timeout=ai_data['timeout'],
+            max_retries=ai_data['max_retries'],
+            options=ai_data['options']
         )
     
     @property
     def server(self) -> ServerConfig:
         """服务器配置"""
-        server_data = self._config_data.get('server', {})
+        server_data = self._config_data.get('server')
+        if not server_data:
+            error_msg = self._get_error_message(
+                CONFIG_CONTENT_MISSING,
+                "配置文件中缺少server配置段"
+            )
+            raise ValueError(error_msg)
+            
+        required_fields = ['host', 'port', 'debug', 'auto_reload_config']
+        for field in required_fields:
+            if field not in server_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件中缺少必要的服务器配置字段: server.{field}"
+                )
+                raise ValueError(error_msg)
+        
         return ServerConfig(
-            host=server_data.get('host', 'localhost'),
-            port=server_data.get('port', 8000),
-            debug=server_data.get('debug', False),
-            auto_reload_config=server_data.get('auto_reload_config', False)
+            host=server_data['host'],
+            port=server_data['port'],
+            debug=server_data['debug'],
+            auto_reload_config=server_data['auto_reload_config']
         )
     
     @property
     def storage(self) -> StorageConfig:
         """存储配置"""
-        storage_data = self._config_data.get('storage', {})
+        storage_data = self._config_data.get('storage')
+        if not storage_data:
+            error_msg = self._get_error_message(
+                CONFIG_CONTENT_MISSING,
+                "配置文件中缺少storage配置段"
+            )
+            raise ValueError(error_msg)
+            
+        required_fields = ['download_dir', 'models_dir', 'export_excel', 'auto_backup']
+        for field in required_fields:
+            if field not in storage_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件中缺少必要的存储配置字段: storage.{field}"
+                )
+                raise ValueError(error_msg)
+        
         return StorageConfig(
-            download_dir=storage_data.get('download_dir', './download'),
-            models_dir=storage_data.get('models_dir', './models'),
-            export_excel=storage_data.get('export_excel', True),
-            auto_backup=storage_data.get('auto_backup', True)
+            download_dir=storage_data['download_dir'],
+            models_dir=storage_data['models_dir'],
+            export_excel=storage_data['export_excel'],
+            auto_backup=storage_data['auto_backup']
         )
     
     @property
     def asr(self) -> ASRConfig:
         """ASR配置"""
-        asr_data = self._config_data.get('asr', {})
+        asr_data = self._config_data.get('asr')
+        if not asr_data:
+            error_msg = self._get_error_message(
+                CONFIG_CONTENT_MISSING,
+                "配置文件中缺少asr配置段"
+            )
+            raise ValueError(error_msg)
+            
+        required_fields = ['provider', 'model', 'language', 'sample_rate']
+        for field in required_fields:
+            if field not in asr_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件中缺少必要的ASR配置字段: asr.{field}"
+                )
+                raise ValueError(error_msg)
+        
         return ASRConfig(
-            provider=asr_data.get('provider', 'cpu'),
-            model=asr_data.get('model', 'fireredasr'),
-            language=asr_data.get('language', 'zh'),
-            sample_rate=asr_data.get('sample_rate', 16000)
+            provider=asr_data['provider'],
+            model=asr_data['model'],
+            language=asr_data['language'],
+            sample_rate=asr_data['sample_rate']
         )
     
     @property
     def tts(self) -> TTSConfig:
         """TTS配置"""
-        tts_data = self._config_data.get('tts', {})
+        tts_data = self._config_data.get('tts')
+        if not tts_data:
+            error_msg = self._get_error_message(
+                CONFIG_CONTENT_MISSING,
+                "配置文件中缺少tts配置段"
+            )
+            raise ValueError(error_msg)
+            
+        required_fields = ['provider', 'model', 'speed', 'chunk_size']
+        for field in required_fields:
+            if field not in tts_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件中缺少必要的TTS配置字段: tts.{field}"
+                )
+                raise ValueError(error_msg)
+        
         return TTSConfig(
-            provider=tts_data.get('provider', 'cpu'),
-            model=tts_data.get('model', 'vits-zh-hf-theresa'),
-            speed=tts_data.get('speed', 1.0),
-            chunk_size=tts_data.get('chunk_size', 1024)
+            provider=tts_data['provider'],
+            model=tts_data['model'],
+            speed=tts_data['speed'],
+            chunk_size=tts_data['chunk_size']
         )
     
     @property
     def logging_config(self) -> LoggingConfig:
         """日志配置"""
-        log_data = self._config_data.get('logging', {})
+        log_data = self._config_data.get('logging')
+        if not log_data:
+            error_msg = self._get_error_message(
+                CONFIG_CONTENT_MISSING,
+                "配置文件中缺少logging配置段"
+            )
+            raise ValueError(error_msg)
+        
+        required_fields = ['level', 'format']
+        for field in required_fields:
+            if field not in log_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件中缺少必要的日志配置字段: logging.{field}"
+                )
+                raise ValueError(error_msg)
+        
         return LoggingConfig(
-            level=log_data.get('level', 'INFO'),
-            format=log_data.get('format', '%(levelname)s: %(asctime)s %(name)s:%(lineno)s %(message)s'),
+            level=log_data['level'],
+            format=log_data['format'],
             log_file=log_data.get('log_file')
         )
     
     @property
     def processing(self) -> ProcessingConfig:
         """处理配置"""
-        proc_data = self._config_data.get('processing', {})
+        proc_data = self._config_data.get('processing')
+        if not proc_data:
+            error_msg = self._get_error_message(
+                CONFIG_CONTENT_MISSING,
+                "配置文件中缺少processing配置段"
+            )
+            raise ValueError(error_msg)
+        
+        required_fields = ['threads', 'batch_size', 'enable_concurrent']
+        for field in required_fields:
+            if field not in proc_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件中缺少必要的处理配置字段: processing.{field}"
+                )
+                raise ValueError(error_msg)
+        
         return ProcessingConfig(
-            threads=proc_data.get('threads', 2),
-            batch_size=proc_data.get('batch_size', 100),
-            enable_concurrent=proc_data.get('enable_concurrent', True)
+            threads=proc_data['threads'],
+            batch_size=proc_data['batch_size'],
+            enable_concurrent=proc_data['enable_concurrent']
         )
     
     @property
     def data_processing(self) -> DataProcessingConfig:
         """数据处理配置"""
-        dp_data = self._config_data.get('data_processing', {})
+        dp_data = self._config_data.get('data_processing')
+        if not dp_data:
+            error_msg = self._get_error_message(
+                CONFIG_CONTENT_MISSING,
+                "配置文件中缺少data_processing配置段"
+            )
+            raise ValueError(error_msg)
+        
+        required_fields = ['current_task_config', 'ai_processing_enabled', 'ai_timeout_per_record', 'ai_retry_failed_records']
+        for field in required_fields:
+            if field not in dp_data:
+                error_msg = self._get_error_message(
+                    CONFIG_CONTENT_MISSING,
+                    f"配置文件中缺少必要的数据处理配置字段: data_processing.{field}"
+                )
+                raise ValueError(error_msg)
+        
         config = DataProcessingConfig(
-            current_task_config=dp_data.get('current_task_config', 'driving_evaluation'),
-            ai_processing_enabled=dp_data.get('ai_processing_enabled', True),
-            ai_timeout_per_record=dp_data.get('ai_timeout_per_record', 30),
-            ai_retry_failed_records=dp_data.get('ai_retry_failed_records', False)
+            current_task_config=dp_data['current_task_config'],
+            ai_processing_enabled=dp_data['ai_processing_enabled'],
+            ai_timeout_per_record=dp_data['ai_timeout_per_record'],
+            ai_retry_failed_records=dp_data['ai_retry_failed_records']
         )
         
         # 加载当前任务配置
@@ -341,59 +454,44 @@ class Config:
         """加载指定的任务配置文件"""
         task_config_path = f"./toexcel/task_configs/{task_name}.yaml"
         
+        if not os.path.exists(task_config_path):
+            error_msg = self._get_error_message(
+                TASK_CONFIG_MISSING,
+                f"任务配置文件不存在: {task_config_path}，项目必须依赖任务配置文件才能运行"
+            )
+            raise FileNotFoundError(error_msg)
+        
         try:
-            if not os.path.exists(task_config_path):
-                logger.warning(f"任务配置文件不存在: {task_config_path}，使用默认配置")
-                return self._get_default_task_config()
-            
             with open(task_config_path, 'r', encoding='utf-8') as f:
-                task_data = yaml.safe_load(f) or {}
+                task_data = yaml.safe_load(f)
+            
+            if not task_data:
+                error_msg = self._get_error_message(
+                    TASK_CONFIG_MISSING,
+                    f"任务配置文件为空: {task_config_path}"
+                )
+                raise ValueError(error_msg)
+            
+            required_fields = ['task_info', 'score_mapping', 'rating_thresholds', 'takeover_keywords', 'excel_export']
+            for field in required_fields:
+                if field not in task_data:
+                    error_msg = self._get_error_message(
+                        TASK_CONFIG_MISSING,
+                        f"任务配置文件中缺少必要字段: {field}"
+                    )
+                    raise ValueError(error_msg)
             
             return TaskConfig(
-                task_info=task_data.get('task_info', {}),
-                score_mapping=task_data.get('score_mapping', {}),
-                rating_thresholds=task_data.get('rating_thresholds', {}),
-                takeover_keywords=task_data.get('takeover_keywords', {}),
-                excel_export=task_data.get('excel_export', {})
+                task_info=task_data['task_info'],
+                score_mapping=task_data['score_mapping'],
+                rating_thresholds=task_data['rating_thresholds'],
+                takeover_keywords=task_data['takeover_keywords'],
+                excel_export=task_data['excel_export']
             )
             
         except Exception as e:
             logger.error(f"加载任务配置失败: {e}")
-            return self._get_default_task_config()
-    
-    def _get_default_task_config(self) -> TaskConfig:
-        """获取默认任务配置"""
-        return TaskConfig(
-            task_info={
-                'name': '默认任务',
-                'description': '默认数据处理任务',
-                'version': '1.0'
-            },
-            score_mapping={
-                '压力性': 'Mental_Load',
-                '可预测性': 'Predicatabl', 
-                '响应性': 'Timely_Response',
-                '舒适性': 'Comfort',
-                '效率性': 'Efficiency',
-                '功能性': 'Features',
-                '安全性': 'safety'
-            },
-            rating_thresholds={
-                'excellent': 8.0,
-                'good': 7.0,
-                'fair': 5.0
-            },
-            takeover_keywords={
-                '危险接管': ['危险接管', '紧急接管', '安全接管'],
-                '车机接管': ['车机接管', '系统接管', '自动接管'],
-                '人为接管': ['人为接管', '手动接管', '优化接管']
-            },
-            excel_export={
-                'enabled': True,
-                'include_statistics': True,
-                'default_columns': ['time', 'comment', 'function', 'Mental_Load', 'Predicatabl', 'Timely_Response', 'Comfort', 'Efficiency', 'Features', 'safety', '是否剪辑']
-            }
-        )
+            raise
     
     def validate(self) -> bool:
         """验证配置的有效性"""
