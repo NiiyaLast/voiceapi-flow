@@ -7,9 +7,11 @@ import platform
 
 def export_to_excel(results, filename):
     """
-    将识别结果导出为 Excel 文件。
+    将识别结果导出为 Excel 文件。支持单个数据集和多个数据集（对象数组）。
 
-    :param results: 包含识别结果的列表，每个元素是一个字典，格式为 {"time": 时间, "result": 结果}
+    :param results: 
+        - 单个数据集：包含识别结果的列表，每个元素是一个字典，格式为 {"time": 时间, "result": 结果}
+        - 多个数据集：对象数组，每个对象包含数据和sheet名称，格式为 [{"data": [...], "sheet_name": "..."}, ...]
     :param filename: 导出的 Excel 文件名
     """
   
@@ -19,21 +21,97 @@ def export_to_excel(results, filename):
     # 拼接完整路径
     filepath = os.path.join(output_dir, filename)
 
+    # 检查是否为对象数组（多个数据集）
+    if isinstance(results, list) and len(results) > 0 and isinstance(results[0], dict):
+        # 处理对象数组，每个对象写入一个sheet
+        export_multiple_sheets_to_excel(results, filepath)
+    else:
+        # 处理单个数据集
+        export_single_sheet_to_excel(results, filepath)
+
+    print(f"Results exported to {filepath}")
+    open_excel_file(filepath)
+
+
+def export_single_sheet_to_excel(results, filepath):
+    """
+    将单个数据集导出为 Excel 文件（单个sheet）。
+
+    :param results: 包含识别结果的列表，每个元素是一个字典
+    :param filepath: 导出的 Excel 文件完整路径
+    """
     # 将结果转换为 pandas DataFrame
     df = pd.DataFrame(results)
 
     # 导出为 Excel 文件
     df.to_excel(filepath, index=False)
 
-    print(f"Results exported to {filepath}")
 
-    open_excel_file(filepath)
+def export_multiple_sheets_to_excel(results_array, filepath):
+    """
+    将多个数据集导出为 Excel 文件（多个sheet）。
 
-    # file_path = r"C:\niiya\tools\AI\voiceapi\voiceapi\download"  # 替换为实际路径
-    # file_name = "asr_results_2025-06-23_18-09-33.xlsx"  # 替换为实际文件名
+    :param results_array: 对象数组，每个对象包含数据和sheet名称
+                         格式为 [{"data": [...], "sheet_name": "..."}, ...]
+    :param filepath: 导出的 Excel 文件完整路径
+    """
+    try:
+        # 创建 ExcelWriter 对象
+        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+            for i, result_obj in enumerate(results_array):
+                # 获取数据和sheet名称
+                data = result_obj.get('data', [])
+                sheet_name = result_obj.get('name', f'Sheet{i+1}')
+                
+                # 确保sheet名称符合Excel命名规范
+                sheet_name = sanitize_sheet_name(sheet_name)
+                
+                # 将数据转换为DataFrame
+                if data:  # 如果有数据
+                    df = pd.DataFrame(data)
+                    # 写入指定的sheet
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    print(f"数据已写入sheet: {sheet_name}，共 {len(data)} 行数据")
+                else:
+                    # 如果没有数据，创建空的sheet
+                    pd.DataFrame().to_excel(writer, sheet_name=sheet_name, index=False)
+                    print(f"创建空sheet: {sheet_name}")
+        
+        print(f"成功创建包含 {len(results_array)} 个sheet的Excel文件")
+        
+    except Exception as e:
+        print(f"创建多sheet Excel文件时出错: {e}")
+        # 回退到单sheet模式
+        all_data = []
+        for result_obj in results_array:
+            data = result_obj.get('data', [])
+            all_data.extend(data)
+        export_single_sheet_to_excel(all_data, filepath)
+
+
+def sanitize_sheet_name(name):
+    """
+    清理sheet名称，确保符合Excel命名规范。
     
-    # # 使用开放接口读取数据并进行AI处理
-    # reader = process_excel_with_ai(file_path, file_name, enable_ai_processing=True)
+    :param name: 原始sheet名称
+    :return: 清理后的sheet名称
+    """
+    # Excel sheet名称不能包含这些字符: \ / * ? [ ] :
+    invalid_chars = ['\\', '/', '*', '?', '[', ']', ':']
+    sanitized = name
+    
+    for char in invalid_chars:
+        sanitized = sanitized.replace(char, '_')
+    
+    # Excel sheet名称最大长度为31个字符
+    if len(sanitized) > 31:
+        sanitized = sanitized[:31]
+    
+    # 不能为空或只包含空格
+    if not sanitized or sanitized.isspace():
+        sanitized = "Sheet1"
+    
+    return sanitized
 
 
 def export_to_excel_sheetn(results, filename, sheet_name="Sheet2"):
