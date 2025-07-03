@@ -13,7 +13,7 @@ import argparse
 import glob
 import os
 from datetime import datetime
-from toexcel.structured_data import process_excel_with_ai
+from business_logic.business_logic import BusinessLogicRouter
 from config_manager import get_config
 
 app = FastAPI()
@@ -26,102 +26,37 @@ except Exception as e:
     logger.error(f"无法加载配置文件，项目必须依赖配置文件才能运行: {e}")
     raise RuntimeError(f"无法加载配置文件，项目必须依赖配置文件才能运行: {e}")
 
-# 获取最新待处理的Excel文件
-def get_latest_excel_file():
-    """获取download目录下最新的以'asr_results_'开头的Excel文件"""
-    download_dir = config.storage.download_dir
-    
-    if not os.path.exists(download_dir):
-        logger.warning(f"下载目录不存在: {download_dir}")
-        return None, None
-    
-    # 定义搜索模式
-    search_patterns = [
-        os.path.join(download_dir, "asr_results_*.xlsx"),
-        os.path.join(download_dir, "asr_results_*.xls")
-    ]
-    
-    # 获取所有匹配的Excel文件
-    excel_files = []
-    for pattern in search_patterns:
-        excel_files.extend(glob.glob(pattern))
-    
-    if not excel_files:
-        logger.info("没有找到以'asr_results_'开头的Excel文件")
-        return None, None
-    
-    # 按修改时间排序，获取最新的文件
-    latest_file = max(excel_files, key=os.path.getmtime)
-    file_name = os.path.basename(latest_file)
-    
-    # 获取文件修改时间用于日志
-    file_modified = os.path.getmtime(latest_file)
-    modified_time = datetime.fromtimestamp(file_modified).strftime('%Y-%m-%d %H:%M:%S')
-    
-    logger.info(f"找到最新的ASR结果Excel文件: {file_name} (修改时间: {modified_time})")
-    return download_dir, file_name
-
 # 简化的AI处理API端点
 @app.post("/ai-process-excel", 
           description="Process the latest Excel file with AI analysis")
 async def ai_process_latest_excel():
     """
     处理download目录下最新的Excel文件并进行AI分析
+    通过业务逻辑层进行处理
     """
     try:
-        # 获取最新要的Excel文件
-        file_path, file_name = get_latest_excel_file()
+        # 初始化业务逻辑路由器
+        router = BusinessLogicRouter()
         
-        if not file_path or not file_name:
+        # 获取对应的任务处理器
+        processor = router.route_to_processor()
+        
+        
+        # 执行完整的业务流程
+        result = processor.execute_task_flow()
+        
+        if not result['success']:
             raise HTTPException(
-                status_code=404, 
-                detail="没有找到Excel文件，请先进行语音识别生成文件"
+                status_code=500,
+                detail=f"业务流程执行失败: {result.get('error', '未知错误')}"
             )
         
-        logger.info(f"开始AI处理最新文件: {file_path}/{file_name}")
-        
-        # 调用structured_data的process_excel_with_ai函数
-        reader = process_excel_with_ai(
-            file_path=file_path,
-            file_name=file_name,
-            enable_ai_processing=config.ai.enabled
-        )
-        
-        # 获取处理结果
-        data = reader.get_data()
-        total_count = len(data)
-        
-        # 统计处理成功的记录数（假设AI处理成功的记录会有特定标识）
-        processed_count = sum(1 for item in data if item.get('ai_processed', False))
-        
-        # 获取文件信息
-        full_path = os.path.join(file_path, file_name)
-        file_size = os.path.getsize(full_path)
-        file_modified = os.path.getmtime(full_path)
-        
-        return {
-            "status": "success",
-            "message": "AI处理完成",
-            "file_info": {
-                "name": file_name,
-                "size": file_size,
-                "modified": file_modified,
-                "path": file_path
-            },
-            "processing_results": {
-                "total_records": total_count,
-                "processed_records": processed_count,
-                "success_rate": f"{(processed_count/total_count*100):.1f}%" if total_count > 0 else "0%"
-            }
-        }
-        
-    except FileNotFoundError as e:
-        logger.error(f"文件未找到: {e}")
-        raise HTTPException(status_code=404, detail=f"文件未找到: {str(e)}")
-        
+        return
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"AI处理失败: {e}")
-        raise HTTPException(status_code=500, detail=f"AI处理失败: {str(e)}")
+        logger.error(f"业务逻辑层处理失败: {e}")
+        raise HTTPException(status_code=500, detail=f"业务逻辑层处理失败: {str(e)}")
 
 @app.websocket("/asr")
 async def websocket_asr(websocket: WebSocket,
@@ -353,7 +288,17 @@ if __name__ == "__main__":
     parser.add_argument("--tts-model", type=str, default=config.tts.model,
                         help="TTS model name: vits-zh-hf-theresa, vits-melo-tts-zh_en, kokoro-multi-lang-v1_0")
 
-    args = parser.parse_args()
+    # 处理调试模式下的参数解析问题
+    try:
+        args = parser.parse_args()
+    except SystemExit as e:
+        # 在调试模式下，如果参数解析失败，使用默认值
+        if e.code == 2:  # 参数解析错误
+            logger.warning("参数解析失败，使用默认配置值")
+            args = parser.parse_args([])  # 使用空参数列表，将使用所有默认值
+        else:
+            # 其他系统退出情况（如 --help），重新抛出异常
+            raise
 
     if args.tts_model == 'vits-melo-tts-zh_en' and args.tts_provider == 'cuda':
         logger.warning(
