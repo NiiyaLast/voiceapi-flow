@@ -34,8 +34,6 @@ class CarTestDataProcessor:
         # 从配置文件读取参数
         self.provider = provider or config.ai.provider.lower()
         self.model_name = model_name or config.ai.model_name
-        self.base_url = base_url or config.ai.api_url
-        self.api_key = config.ai.api_key
         self.timeout = config.ai.timeout
         self.max_retries = config.ai.max_retries
         
@@ -45,13 +43,25 @@ class CarTestDataProcessor:
         
         self.ai_options = config.ai.options
         
+        # 读取端点配置 - 消除硬编码
+        if not hasattr(config.ai, 'endpoints') or not config.ai.endpoints:
+            raise RuntimeError("配置文件中缺少ai.endpoints配置，请添加各提供商的端点配置")
+        
+        self.endpoints_config = config.ai.endpoints
+        
         # 验证关键配置项
         if not self.model_name:
             raise RuntimeError("配置文件中缺少model_name")
-        if not self.base_url:
-            raise RuntimeError("配置文件中缺少api_url")
+        if self.provider not in self.endpoints_config:
+            raise RuntimeError(f"配置文件中缺少{self.provider}的端点配置")
+        
+        # 从端点配置中获取API密钥
+        provider_config = self.endpoints_config[self.provider]
+        self.api_key = provider_config.get('api_key')
+        
+        # 验证API密钥（仅对需要的提供商）
         if self.provider in ['openai', 'deepseek'] and not self.api_key:
-            raise RuntimeError(f"使用{self.provider}时必须配置api_key")
+            raise RuntimeError(f"使用{self.provider}时必须在endpoints.{self.provider}.api_key中配置API密钥")
             
         # 初始化OpenAI客户端（用于DeepSeek和OpenAI）
         self.openai_client = None
@@ -59,11 +69,13 @@ class CarTestDataProcessor:
             if OpenAI is None:
                 raise RuntimeError("使用OpenAI或DeepSeek时需要安装openai库: pip install openai")
             
-            # 为DeepSeek设置正确的base_url
-            if self.provider == 'deepseek':
-                api_base = "https://api.deepseek.com"
-            else:
-                api_base = "https://api.openai.com/v1"
+            # 从配置文件读取base_url - 消除硬编码
+            provider_config = self.endpoints_config[self.provider]
+            api_base = provider_config['base_url']
+            
+            # 对于OpenAI SDK，确保base_url格式正确（都需要/v1结尾）
+            if not api_base.endswith('/v1'):
+                api_base = api_base.rstrip('/') + '/v1'
             
             self.openai_client = OpenAI(
                 api_key=self.api_key,
@@ -78,17 +90,15 @@ class CarTestDataProcessor:
         self.system_prompt = self._load_system_prompt("system_prompt.txt")
 
     def _setup_api_endpoint(self):
-        """根据提供商设置API端点"""
-        if self.provider == 'ollama':
-            self.api_url = f"{self.base_url}/api/chat"
-        elif self.provider == 'openai':
-            self.api_url = "https://api.openai.com/v1/chat/completions"
-        elif self.provider == 'deepseek':
-            self.api_url = "https://api.deepseek.com/v1/chat/completions"
-        else:
-            raise RuntimeError(f"不支持的AI提供商: {self.provider}")
+        """根据提供商设置API端点 """
+        provider_config = self.endpoints_config[self.provider]
+        base_url = provider_config['base_url']
+        chat_endpoint = provider_config['chat_endpoint']
         
-        print(f"使用AI提供商: {self.provider}, 模型: {self.model_name}, API端点: {self.api_url}")
+        # 构建完整的API URL
+        self.api_url = base_url.rstrip('/') + chat_endpoint
+        
+        # print(f"使用AI提供商: {self.provider}, 模型: {self.model_name}, API端点: {self.api_url}")
 
 
     def _load_system_prompt(self, prompt_file: str) -> str:
