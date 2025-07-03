@@ -24,12 +24,11 @@ class AIConfig:
     """AI配置"""
     enabled: bool
     provider: str
-    api_url: str
-    api_key: Optional[str]
     model_name: str
     timeout: int
     max_retries: int
     options: Optional[Dict[str, Any]]
+    endpoints: Optional[Dict[str, Any]]  # 端点配置（包含API密钥）
 
 @dataclass
 class ServerConfig:
@@ -158,7 +157,7 @@ class Config:
                 raise ValueError(error_msg)
                 
             # 验证必要的配置段是否存在
-            required_sections = ['ai', 'server', 'storage', 'asr', 'tts', 'logging', 'processing', 'data_processing']
+            required_sections = ['ai', 'server', 'storage', 'asr', 'tts', 'logging', 'processing', 'task']
             for section in required_sections:
                 if section not in self._config_data:
                     error_msg = self._get_error_message(
@@ -169,7 +168,7 @@ class Config:
             
             # 验证AI配置中的必要字段
             ai_config = self._config_data.get('ai', {})
-            required_ai_fields = ['provider', 'api_url', 'model_name', 'timeout', 'max_retries', 'options']
+            required_ai_fields = ['provider', 'model_name', 'timeout', 'max_retries', 'options', 'endpoints']
             for field in required_ai_fields:
                 if field not in ai_config:
                     error_msg = self._get_error_message(
@@ -183,9 +182,14 @@ class Config:
             if provider not in ['ollama', 'openai', 'deepseek']:
                 raise ValueError(f"不支持的AI提供商: {provider}，支持的选项: ollama, openai, deepseek")
             
-            # 验证外部模型的API密钥
-            if provider in ['openai', 'deepseek'] and not ai_config.get('api_key'):
-                raise ValueError(f"使用{provider}时必须配置api_key")
+            # 验证端点配置中的API密钥
+            endpoints = ai_config.get('endpoints', {})
+            if provider in ['openai', 'deepseek']:
+                if provider not in endpoints:
+                    raise ValueError(f"使用{provider}时必须在ai.endpoints.{provider}中配置端点信息")
+                provider_config = endpoints[provider]
+                if not provider_config.get('api_key'):
+                    raise ValueError(f"使用{provider}时必须在ai.endpoints.{provider}.api_key中配置API密钥")
                 
             # 更新最后修改时间
             self._last_modified = os.path.getmtime(self.config_path)
@@ -250,7 +254,7 @@ class Config:
             raise ValueError(error_msg)
             
         # 检查必要字段
-        required_fields = ['enabled', 'provider', 'api_url', 'model_name', 'timeout', 'max_retries', 'options']
+        required_fields = ['enabled', 'provider', 'model_name', 'timeout', 'max_retries', 'options', 'endpoints']
         for field in required_fields:
             if field not in ai_data:
                 error_msg = self._get_error_message(
@@ -262,12 +266,11 @@ class Config:
         return AIConfig(
             enabled=ai_data['enabled'],
             provider=ai_data['provider'],
-            api_url=ai_data['api_url'],
-            api_key=ai_data.get('api_key'),
             model_name=ai_data['model_name'],
             timeout=ai_data['timeout'],
             max_retries=ai_data['max_retries'],
-            options=ai_data['options']
+            options=ai_data['options'],
+            endpoints=ai_data['endpoints']  # 端点配置现在包含API密钥
         )
     
     @property
@@ -431,80 +434,60 @@ class Config:
         )
     
     @property
-    def data_processing(self) -> DataProcessingConfig:
-        """数据处理配置"""
-        dp_data = self._config_data.get('data_processing')
-        if not dp_data:
+    def task(self) -> Dict[str, Any]:
+        """任务配置"""
+        task_data = self._config_data.get('task')
+        if not task_data:
             error_msg = self._get_error_message(
                 CONFIG_CONTENT_MISSING,
-                "配置文件中缺少data_processing配置段"
+                "配置文件中缺少task配置段"
             )
             raise ValueError(error_msg)
         
-        required_fields = ['current_task_config', 'ai_processing_enabled', 'ai_timeout_per_record', 'ai_retry_failed_records']
+        required_fields = ['name', 'default_filename_template', 'score_mapping']
         for field in required_fields:
-            if field not in dp_data:
+            if field not in task_data:
                 error_msg = self._get_error_message(
                     CONFIG_CONTENT_MISSING,
-                    f"配置文件中缺少必要的数据处理配置字段: data_processing.{field}"
+                    f"配置文件中缺少必要的任务配置字段: task.{field}"
                 )
                 raise ValueError(error_msg)
         
-        config = DataProcessingConfig(
-            current_task_config=dp_data['current_task_config'],
-            ai_processing_enabled=dp_data['ai_processing_enabled'],
-            ai_timeout_per_record=dp_data['ai_timeout_per_record'],
-            ai_retry_failed_records=dp_data['ai_retry_failed_records']
-        )
+        return {
+            'name': task_data['name'],
+            'default_filename_template': task_data['default_filename_template'],
+            'score_mapping': task_data['score_mapping']
+        }
+    
+    @property
+    def data_processing(self) -> DataProcessingConfig:
+        """数据处理配置 - 简化版本，基于新的配置格式"""
+        # 从task配置中提取基本信息
+        task_data = self._config_data.get('task', {})
+        task_name = task_data.get('name', '')
         
-        # 加载当前任务配置
-        task_config = self.load_task_config(config.current_task_config)
-        config.task_config = task_config
+        # 创建简化的数据处理配置
+        config = DataProcessingConfig(
+            current_task_config=task_name,
+            ai_processing_enabled=self.ai.enabled,
+            ai_timeout_per_record=self.ai.timeout,
+            ai_retry_failed_records=True,  # 默认开启重试
+            task_config=None  # 不再需要复杂的任务配置
+        )
         
         return config
     
-    def load_task_config(self, task_name: str) -> TaskConfig:
-        """加载指定的任务配置文件"""
-        task_config_path = f"./toexcel/task_configs/{task_name}.yaml"
-        
-        if not os.path.exists(task_config_path):
-            error_msg = self._get_error_message(
-                TASK_CONFIG_MISSING,
-                f"任务配置文件不存在: {task_config_path}，项目必须依赖任务配置文件才能运行"
-            )
-            raise FileNotFoundError(error_msg)
-        
-        try:
-            with open(task_config_path, 'r', encoding='utf-8') as f:
-                task_data = yaml.safe_load(f)
-            
-            if not task_data:
-                error_msg = self._get_error_message(
-                    TASK_CONFIG_MISSING,
-                    f"任务配置文件为空: {task_config_path}"
-                )
-                raise ValueError(error_msg)
-            
-            required_fields = ['task_info', 'score_mapping', 'rating_thresholds', 'takeover_keywords', 'excel_export']
-            for field in required_fields:
-                if field not in task_data:
-                    error_msg = self._get_error_message(
-                        TASK_CONFIG_MISSING,
-                        f"任务配置文件中缺少必要字段: {field}"
-                    )
-                    raise ValueError(error_msg)
-            
-            return TaskConfig(
-                task_info=task_data['task_info'],
-                score_mapping=task_data['score_mapping'],
-                rating_thresholds=task_data['rating_thresholds'],
-                takeover_keywords=task_data['takeover_keywords'],
-                excel_export=task_data['excel_export']
-            )
-            
-        except Exception as e:
-            logger.error(f"加载任务配置失败: {e}")
-            raise
+    def get_task_name(self) -> str:
+        """获取当前任务名称"""
+        return self.task.get('name', '')
+    
+    def get_task_score_mapping(self) -> Dict[str, str]:
+        """获取任务评分映射"""
+        return self.task.get('score_mapping', {})
+    
+    def get_task_filename_template(self) -> str:
+        """获取任务文件名模板"""
+        return self.task.get('default_filename_template', 'result_{timestamp}.xlsx')
     
     def validate(self) -> bool:
         """验证配置的有效性"""
@@ -525,8 +508,11 @@ class Config:
                 logger.warning(f"模型目录不存在: {models_dir}")
             
             # 验证AI配置
-            if self.ai.enabled and not self.ai.api_url:
-                raise ValueError("AI已启用但未配置API地址")
+            if self.ai.enabled:
+                if not self.ai.endpoints:
+                    raise ValueError("AI已启用但未配置端点信息")
+                if self.ai.provider not in self.ai.endpoints:
+                    raise ValueError(f"AI提供商 {self.ai.provider} 未在端点配置中找到")
             
             # 验证采样率
             if self.asr.sample_rate <= 0:

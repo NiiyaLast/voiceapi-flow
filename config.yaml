@@ -1,14 +1,27 @@
-ai:
-  # provider: ollama   
-  provider: deepseek      # 支持：ollama, openai, deepseek
-  # api_url: http://localhost:11434
-  api_url: https://api.deepseek.com/v1
-  api_key: null           # 外部模型API密钥，ollama不需要
+ai: 
   enabled: true
+  # provider: deepseek      # 支持：ollama, openai, deepseek
+  provider: ollama
   max_retries: 3
-  # model_name: qwen3:1.7b
-  model_name: deepseek-chat
+  model_name: qwen3:1.7b
+  # model_name: deepseek-chat
   timeout: 60
+  
+  # 各提供商的API端点配置 - 消除硬编码，支持多账户
+  endpoints:
+    ollama:
+      base_url: http://localhost:11434      # Ollama服务地址
+      chat_endpoint: /api/chat              # 聊天API路径
+      api_key: null                         # Ollama不需要API密钥
+    openai:
+      base_url: https://api.openai.com/v1   # OpenAI API基础URL
+      chat_endpoint: /chat/completions      # 聊天API路径
+      api_key: your-openai-api-key-here     # OpenAI API密钥
+    deepseek:
+      base_url: https://api.deepseek.com    # DeepSeek API基础URL
+      chat_endpoint: /v1/chat/completions   # 聊天API路径
+      api_key: your-deepseek-api-key-here  # DeepSeek API密钥
+  
   # AI模型推理参数
   options:
     temperature: 0.0      # 随机性控制，0.0=完全确定性，2.0=高随机性
@@ -46,9 +59,23 @@ tts:
   provider: cpu
   speed: 1.0
 
-# 数据处理配置
-data_processing:
-  current_task_config: "driving_evaluation"  # 当前使用的任务配置文件名
-  ai_processing_enabled: true                # 全局AI处理开关
-  ai_timeout_per_record: 30                 # AI处理超时时间
-  ai_retry_failed_records: false            # 是否重试失败记录
+# 数据库配置
+database:
+  type: sqlite
+  path: ./data/voiceapi_flow.db
+  auto_create: true
+  backup_enabled: true
+  backup_interval: 86400  # 24小时
+
+# 任务配置 - 简化的任务定义
+task:
+  name: "driving_evaluation"
+  default_filename_template: "ai_result_{timestamp}.xlsx"
+  score_mapping:
+    "压力性": "Mental_Load"
+    "可预测性": "Predictable"
+    "响应性": "Timely_Response"
+    "舒适性": "Comfort"
+    "效率性": "Efficiency"
+    "功能性": "Features"
+    "安全性": "Safety"
