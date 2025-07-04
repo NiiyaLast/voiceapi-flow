@@ -22,7 +22,7 @@ def export_to_excel(results, filename):
     filepath = os.path.join(output_dir, filename)
 
     # 检查是否为对象数组（多个数据集）
-    if isinstance(results, list) and len(results) > 0 and isinstance(results[0], dict):
+    if isinstance(results, list) and len(results) > 0 and isinstance(results[0], dict) and 'data' in results[0]:
         # 处理对象数组，每个对象写入一个sheet
         export_multiple_sheets_to_excel(results, filepath)
     else:
