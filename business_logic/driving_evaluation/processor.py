@@ -210,6 +210,7 @@ class DrivingEvaluationProcessor:
                     logger.error(f"评分维度展开失败（记录{ai_result.get('row_index', 'unknown')}）: {e}")
                     self.expanded_results.append(ai_result)
                     continue
+            logger.info("评分维度展开完成")
         except Exception as e:
             logger.error(f"评分维度展开步骤失败: {e}")
             raise
@@ -317,14 +318,31 @@ class DrivingEvaluationProcessor:
     def _get_takeover_statistics(self):
         """获取接管统计"""
         try:
-            # 读取takeover_statistics.sql文件
-            sql_file_path = Path(__file__).parent / 'takeover_statistics.sql'
-            with open(sql_file_path, 'r', encoding='utf-8') as f:
-                sql = f.read().strip()
-            
-            # 执行SQL查询
-            data = self.data_service.execute_select_sql(sql)
-            return {"data": data, "name": "takeover_statistics"}
+            if self.data_service.is_table_empty("activity_sessions"):
+                logger.info("活动表为空，使用简化的接管统计查询")
+                
+                # 使用简化的SQL查询（基于主表时间范围）
+                sql_file_path = Path(__file__).parent / 'takeover_statistics_simple.sql'
+                with open(sql_file_path, 'r', encoding='utf-8') as f:
+                    sql = f.read().strip()
+                
+                # 执行SQL查询
+                data = self.data_service.execute_select_sql(sql)
+                logger.debug(f"简化接管统计查询返回{len(data)}条记录")
+                return {"data": data, "name": "takeover_statistics"}
+            else:
+                logger.info("活动表不为空，使用完整的接管统计查询")
+                
+                # 读取完整的takeover_statistics.sql文件
+                sql_file_path = Path(__file__).parent / 'takeover_statistics.sql'
+                with open(sql_file_path, 'r', encoding='utf-8') as f:
+                    sql = f.read().strip()
+                
+                # 执行SQL查询
+                data = self.data_service.execute_select_sql(sql)
+                logger.debug(f"完整接管统计查询返回{len(data)}条记录")
+                return {"data": data, "name": "takeover_statistics"}
+                
         except Exception as e:
             logger.error(f"获取接管统计失败: {e}")
             return {"data": [], "error": str(e)}
@@ -336,6 +354,7 @@ class DrivingEvaluationProcessor:
             export_data.append(self._get_main_data())
             export_data.append(self._get_rating_statistics())
             export_data.append(self._get_scene_rating_statistics())
+            self.data_service.delete_all_data_from_table("activity_sessions")
             export_data.append(self._get_takeover_statistics())
             self.export_data = export_data
             logger.debug(f"SQL查询获取了{len(self.export_data)}个导出对象")
