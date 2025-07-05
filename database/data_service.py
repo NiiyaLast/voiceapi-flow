@@ -201,6 +201,33 @@ class DataService:
             logger.error(f"删除表 {table_name} 失败: {e}")
             return False
     
+    def is_table_empty(self, table_name: str) -> bool:
+        """
+        检查指定表是否为空
+        
+        Args:
+            table_name: 表名
+            
+        Returns:
+            True表示表为空，False表示表不为空
+        """
+        try:
+            query = f"SELECT COUNT(*) as count FROM {table_name}"
+            result = self.db_manager.execute_query(query)
+            
+            if result and len(result) > 0:
+                count = result[0]['count']
+                is_empty = count == 0
+                logger.info(f"表 {table_name} 中有 {count} 条记录，{'为空' if is_empty else '不为空'}")
+                return is_empty
+            else:
+                logger.warning(f"无法获取表 {table_name} 的记录数量")
+                return True
+                
+        except Exception as e:
+            logger.error(f"检查表 {table_name} 是否为空失败: {e}")
+            return True  # 发生异常时假设表为空
+    
     def get_all_records(self, table_name: str) -> List[Dict[str, Any]]:
         """
         获取指定表的所有数据
