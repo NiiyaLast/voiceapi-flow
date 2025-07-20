@@ -9,7 +9,7 @@
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@latest/dist/tailwind.min.css" rel="stylesheet">
     <script src="//cdn.jsdelivr.net/npm/alpinejs@3.13.7/dist/cdn.min.js" defer></script>
     <script src="./app.js"></script>
-    <title>voiceapi demo </title>
+    <title>voiceapi</title>
     <style>
         * {
             margin: 0;
@@ -198,6 +198,98 @@
         .glow {
             box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
         }
+        
+        /* 编辑功能相关样式 */
+        .message-bubble.group:hover {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 90%);
+        }
+        
+        .message-bubble textarea {
+            background: rgba(31, 41, 55, 0.8);
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            color: white;
+            font-size: 14px;
+            line-height: 1.5;
+            resize: none;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+        
+        .message-bubble textarea:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+        }
+        
+        .edit-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        
+        .edit-button {
+            padding: 4px 12px;
+            border-radius: 6px;
+            border: none;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .edit-button.save {
+            background: #10b981;
+            color: white;
+        }
+        
+        .edit-button.save:hover {
+            background: #059669;
+        }
+        
+        .edit-button.cancel {
+            background: #6b7280;
+            color: white;
+        }
+        
+        .edit-button.cancel:hover {
+            background: #4b5563;
+        }
+        
+        /* 输入控制栏样式 */
+        .input-control-bar {
+            background: rgba(31, 41, 55, 0.5);
+            border-radius: 12px;
+            padding: 8px;
+            backdrop-filter: blur(5px);
+        }
+        
+        .input-field {
+            background: rgba(17, 24, 39, 0.8);
+            border: 1px solid rgba(75, 85, 99, 0.6);
+            transition: all 0.3s ease;
+        }
+        
+        .input-field:focus {
+            background: rgba(17, 24, 39, 1);
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        }
+        
+        .submit-button {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            transition: all 0.3s ease;
+        }
+        
+        .submit-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+        }
+        
+        .submit-button:disabled {
+            background: #6b7280;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
     </style>
     <style type="text/tailwindcss">
         .label { @apply text-gray-900 w-[50px] lg:w-20 }
@@ -298,6 +390,8 @@
         isProcessing: false,
         elapsedTime: 0,
         timer: null,
+        // 输入框相关
+        userInput: '',
         // 音频分析相关
         audioContext: null,
         analyser: null,
@@ -347,6 +441,10 @@
         async processWithAI () {
             await window.demoapp.processWithAI.call(this);
         },
+        async saveResultsToServer() {
+            console.log('保存结果到服务器');
+            return window.demoapp.saveResultsToServer.call();
+        },
         async doasr() {
             await window.demoapp.doasr.call(this);
             this.startRecording();
@@ -362,7 +460,9 @@
             // 停止音频分析
             this.stopAudioAnalyzer();
         },
-
+        async saveLogs(logs) {
+            await window.demoapp.saveLogs(logs);
+        },
         startRecording() {
             this.recording = true;
             this.currentText = '';
@@ -375,26 +475,11 @@
             this.stopTimer();
             this.stopVisualization();
             
-            if (this.currentText.trim() !== '') {
-                this.logs.push({
-                    text: this.currentText,
-                    startTime: new Date().toLocaleTimeString(),
-                    type: 'user'
-                });
-            }
-            
             // Simulate processing
             this.isProcessing = true;
             setTimeout(() => {
                 this.isProcessing = false;
-                
-                // Add mock response
-                this.logs.push({
-                    text: 'I understand your request. How can I assist you further?',
-                    startTime: new Date().toLocaleTimeString(),
-                    type: 'system'
-                });
-            }, 1500);
+            }, 2000);
         },
         
         startTimer() {
@@ -631,6 +716,63 @@
             
             this.analyser = null;
             this.audioContext = null;
+        },
+        
+        // 编辑相关方法
+        startEdit(index) {
+            // 设置编辑状态
+            this.logs[index].editing = true;
+            this.logs[index].editText = this.logs[index].result;
+        },
+        
+        saveEdit(index) {
+            // 保存编辑内容
+            this.logs[index].result = this.logs[index].editText;
+            this.logs[index].editing = false;
+            delete this.logs[index].editText;
+            
+            // 调用app.js中的保存方法
+            this.saveLogs(this.logs);
+        },
+        
+        cancelEdit(index) {
+            // 取消编辑
+            this.logs[index].editing = false;
+            delete this.logs[index].editText;
+        },
+        
+        // 提交用户输入
+        submitInput() {
+            if (this.userInput.trim() === '') return;
+            
+            // 添加到logs
+            this.logs.push({
+                result: this.userInput.trim(),
+                time: new Date().toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                }).replace(/\//g, '-').replace(/,/g, '').replace(/\s/g, ' '),
+                idx: this.logs.length
+            });
+            
+            // 保存logs
+            this.saveLogs(this.logs);
+            
+            // 清空输入框
+            this.userInput = '';
+        },
+        
+        // 处理Enter键提交
+        handleInputKeydown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                this.submitInput();
+            }
         }
     }"
     x-init="init()"
@@ -778,14 +920,49 @@
                                 </div>
                             </div>
                             <!-- recording  -->
-                            <div class="flex-grow overflow-y-auto p-4 flex flex-col" id="messages-container">
+                            <div class="flex-grow overflow-y-auto p-4 flex flex-col">
 
                                 <div
-                                    class="rounded border border-gray-500 p-3 w-full flex flex-col items-end h-[36rem] overflow-y-auto">
-                                    <template x-for="item in logs">
-                                        <div class="message-bubble user-message">
-                                            <p x-text="item?.text"></p>
-                                            <span class="text-xs text-gray-400 block mt-2" x-text="item?.startTime"></span>
+                                    class="rounded border border-gray-500 p-3 w-full flex flex-col items-end h-[36rem] overflow-y-auto "
+                                     id="messages-container">
+                                    <template x-for="(item, index) in logs" :key="index">
+                                        <div class="message-bubble user-message group relative">
+                                            <!-- 非编辑状态 -->
+                                            <template x-if="!item.editing">
+                                                <div class="w-full">
+                                                    <p x-text="item?.result" class="cursor-pointer" @click="startEdit(index)"></p>
+                                                    <span class="text-xs text-gray-400 block mt-2" x-text="item?.time"></span>
+                                                    <!-- 编辑按钮，鼠标悬停时显示 -->
+                                                    <button @click="startEdit(index)" 
+                                                            class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-700 hover:bg-gray-600 text-white p-1 rounded text-xs">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            </template>
+                                            
+                                            <!-- 编辑状态 -->
+                                            <template x-if="item.editing">
+                                                <div class="w-full">
+                                                    <textarea x-model="item.editText" 
+                                                             class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white resize-none"
+                                                             rows="3"
+                                                             @keydown.escape="cancelEdit(index)"
+                                                             @keydown.ctrl.enter="saveEdit(index)"></textarea>
+                                                    <div class="flex gap-2 mt-2">
+                                                        <button @click="saveEdit(index)" 
+                                                                class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs">
+                                                            保存
+                                                        </button>
+                                                        <button @click="cancelEdit(index)" 
+                                                                class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs">
+                                                            取消
+                                                        </button>
+                                                    </div>
+                                                    <span class="text-xs text-gray-400 block mt-1" x-text="item?.time"></span>
+                                                </div>
+                                            </template>
                                         </div>
                                     </template>
                                 </div>
@@ -805,34 +982,65 @@
                                     </div>
                                 </template>
                                 <!-- Recording Controls -->
-                                <div class="border-t border-gray-800 p-4 flex flex-col items-center">
-                                    <template x-if="!recording">
-                                        <div class="flex flex-col items-center">
-                                        <button @click="doasr" 
-                                                class="pulse w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg hover:from-indigo-600 hover:to-purple-700 transition-all duration-300">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                <div class="border-t border-gray-800 p-4">
+                                    <!-- 输入控制栏 -->
+                                    <div class="flex items-center gap-3 w-full input-control-bar">
+                                        <!-- 输入框 -->
+                                        <div class="flex-grow">
+                                            <input type="text" 
+                                                   x-model="userInput"
+                                                   @keydown="handleInputKeydown"
+                                                   placeholder="输入文本消息..."
+                                                   class="w-full input-field rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none transition-colors">
+                                        </div>
+                                        
+                                        <!-- 键入按钮 -->
+                                        <button @click="submitInput"
+                                                class="submit-button text-white px-6 py-3 rounded-lg flex items-center gap-2">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                                             </svg>
+                                            <span class="hidden sm:inline">输入</span>
                                         </button>
-                                        <p class="mt-3 text-gray-400">Click to start recording</p>
-                                    </div>
-                                    </template>
-                                    
-                                    <template x-if="recording">
-                                        <div class="flex flex-col items-center w-full">
-                                            <button @click="stopasr" 
-                                                    class="glow w-16 h-16 rounded-full bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-lg hover:from-red-600 hover:to-rose-700 transition-all">
-                                                <div class="w-8 h-8 bg-white rounded-sm"></div>
+                                        
+                                        <!-- 麦克风按钮 -->
+                                        <template x-if="!recording">
+                                            <button @click="doasr"
+                                                    class="pulse w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed flex items-center justify-center shadow-lg hover:from-indigo-600 hover:to-purple-700 transition-all duration-300">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                                </svg>
                                             </button>
-                                            <p class="mt-3 text-rose-400 flex items-center">
+                                        </template>
+                                        
+                                        <template x-if="recording">
+                                            <button @click="stopasr"
+                                                    class="glow w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-lg hover:from-red-600 hover:to-rose-700 transition-all">
+                                                <div class="w-3 h-3 bg-white rounded-sm"></div>
+                                            </button>
+                                        </template>
+                                    </div>
+                                    
+                                    <!-- 状态提示 -->
+                                    <div class="mt-3 text-center">
+                                        <template x-if="recording">
+                                            <p class="text-rose-400 flex items-center justify-center">
                                                 <span class="flex w-3 h-3 mr-2">
                                                     <span class="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-rose-400 opacity-75"></span>
                                                     <span class="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
                                                 </span>
-                                                Recording - Click to stop
+                                                正在录音...
                                             </p>
-                                        </div>
-                                    </template>
+                                        </template>
+                                        
+                                        <template x-if="!recording">
+                                            <p class="text-gray-400 text-sm">
+                                                <span x-show="userInput.trim()">按Enter发送文本，或</span>
+                                                <span x-show="!userInput.trim()">点击麦克风开始录音，或</span>
+                                                输入文本消息
+                                            </p>
+                                        </template>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -842,7 +1050,8 @@
 
             <!-- Features Grid -->
             <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="glass-card p-5 rounded-xl border border-gray-700 hover:border-indigo-500 transition-colors">
+                <div class="glass-card p-5 rounded-xl border border-gray-700 hover:border-indigo-500 transition-colors"
+                    @click="saveResultsToServer">
                     <div class="flex items-start">
                         <div class="bg-indigo-500/10 p-2 rounded-lg">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -890,7 +1099,7 @@
         <!-- Footer -->
         <footer class="mt-12 py-6 text-center border-t border-gray-800 text-gray-500 text-sm">
             <div class="container mx-auto px-4">
-                <p>VoiceAPI Demo • Advanced Speech Recognition Technology</p>
+                <p>VoiceAPI • Advanced Speech Recognition Technology</p>
                 <p class="mt-2">© 2025 NiiyaLast • All rights reserved</p>
             </div>
         </footer>

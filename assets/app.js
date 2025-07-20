@@ -5,7 +5,7 @@ const demoapp = {
     currentText: null,
     disabled: false,
     elapsedTime: null,
-    logs: [{ idx: 0, text: 'Happily here at ruzhila.cn.' }],
+    logs: [],
     // 添加系统状态管理
     systemStatus: {
         apiConnection: 'Checking...',
@@ -24,6 +24,9 @@ const demoapp = {
         setInterval(() => {
             this.checkSystemStatus();
         }, 30000);
+        this.clearLogs()
+        this.logs = [];
+        this.scrollToBottom();
     },
 
     // 检查系统状态
@@ -92,10 +95,6 @@ const demoapp = {
             this.currentAudioContext = null;
         }
         this.currentMediaSource = null;
-        
-        if (this.currentText) {
-            this.logs.push({ idx: this.logs.length + 1, text: this.currentText });
-        }
         this.currentText = null;
     },
 
@@ -116,9 +115,12 @@ const demoapp = {
         
         const ws = new WebSocket('/asr');
         let currentMessage = '';
+        
+        // 保存 this 的引用，避免在回调函数中丢失上下文
+        const self = this;
 
         ws.onopen = () => {
-            this.logs = [];
+            // self.logs = [];
         };
 
         ws.onmessage = (e) => {
@@ -126,21 +128,23 @@ const demoapp = {
             const { text, start_time, finished, idx } = data;
 
             currentMessage = text;
-            this.currentText = text
+            self.currentText = text
 
             if (finished) {
-                this.logs.push({ text: currentMessage, startTime:start_time, idx: idx });
+                self.logs.push({ result: currentMessage, time:start_time, idx: self.logs.length });
+                // 保存更新后的logs
+                self.saveLogs(self.logs);
                 currentMessage = '';
-                this.currentText = null
+                self.currentText = null
             }
         };
 
         // 创建音频上下文并保存引用
-        this.currentAudioContext = new AudioContext({ sampleRate: 16000 });
-        await this.currentAudioContext.audioWorklet.addModule('./audio_process.js');
+        self.currentAudioContext = new AudioContext({ sampleRate: 16000 });
+        await self.currentAudioContext.audioWorklet.addModule('./audio_process.js');
 
-        const recordNode = new AudioWorkletNode(this.currentAudioContext, 'record-audio-processor');
-        recordNode.connect(this.currentAudioContext.destination);
+        const recordNode = new AudioWorkletNode(self.currentAudioContext, 'record-audio-processor');
+        recordNode.connect(self.currentAudioContext.destination);
         recordNode.port.onmessage = (event) => {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 const int16Array = event.data.data;
@@ -149,12 +153,13 @@ const demoapp = {
         }
         
         // 创建媒体源并保存引用
-        this.currentMediaSource = this.currentAudioContext.createMediaStreamSource(mediaStream);
-        this.currentMediaSource.connect(recordNode);
+        self.currentMediaSource = self.currentAudioContext.createMediaStreamSource(mediaStream);
+        self.currentMediaSource.connect(recordNode);
         
-        this.asrWS = ws;
-        this.recording = true;
+        self.asrWS = ws;
+        self.recording = true;
     },
+
     // 简化的AI处理方法
     async processWithAI() {
         this.aiProcessing = true;
@@ -192,6 +197,80 @@ const demoapp = {
             this.aiProcessing = false;
         }
     },
+
+    // 保存logs到本地存储
+    saveLogs(logs) {
+        try {
+            // 保存到localStorage
+            localStorage.setItem('voiceapi_logs', JSON.stringify(logs));
+            console.log('Logs saved successfully:', logs);
+            this.scrollToBottom();
+            
+            // 发送到服务器保存
+            // this.saveLogsToServer(logs);
+            
+        } catch (error) {
+            console.error('保存logs失败:', error);
+        }
+    },
+
+    // 从本地存储加载logs
+    // loadLogs() {
+    //     try {
+    //         const savedLogs = localStorage.getItem('voiceapi_logs');
+    //         if (savedLogs) {
+    //             const logs = JSON.parse(savedLogs);
+    //             console.log('Logs loaded successfully:', JSON.stringify(logs));
+    //             return logs;
+    //         }
+    //     } catch (error) {
+    //         console.error('加载logs失败:', error);
+    //     }
+    //     return [];
+    // },
+    // 清除本地存储中的logs
+    clearLogs() {
+        try {
+            localStorage.removeItem('voiceapi_logs');
+            console.log('Logs cleared successfully');
+        } catch (error) {
+            console.error('清除logs失败:', error);
+        }
+    },
+
+    // 发送logs到服务器保存
+    async saveResultsToServer() {
+        const logs = JSON.parse(localStorage.getItem('voiceapi_logs')) || [];
+        console.log('保存结果到服务器:', JSON.stringify(logs));
+        try {
+            const response = await fetch('/api/results', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ results: logs })
+            });
+            
+            if (response.ok) {
+                console.log('results saved to server successfully');
+            } else {
+                console.warn('Failed to save results to server:', response.status);
+            }
+        } catch (error) {
+            console.warn('Error saving results to server:', error);
+        }
+    },
+    // 滚动到容器底部
+    scrollToBottom() {
+        console.log('滚动到容器底部');
+        // 使用 setTimeout 来确保 DOM 更新完成
+        setTimeout(() => {
+            const container = document.getElementById('messages-container');
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }, 50);
+    }
 }
 
 window.demoapp = demoapp;

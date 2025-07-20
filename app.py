@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 import asyncio
 import logging
 from pydantic import BaseModel, Field
+from typing import List, Any
 import uvicorn
 from voiceapi.tts import TTSResult, start_tts_stream, TTSStream
 from voiceapi.asr import start_asr_stream, ASRStream, ASRResult
@@ -15,6 +16,7 @@ import os
 from datetime import datetime
 from business_logic.business_logic import BusinessLogicRouter
 from config_manager import get_config
+from toexcel.toexcel import export_to_excel 
 
 app = FastAPI()
 logger = logging.getLogger(__file__)
@@ -83,7 +85,7 @@ async def websocket_asr(websocket: WebSocket,
             if not result:
                 return
             await websocket.send_json(result.to_dict())
-            logger.info(result.to_dict())
+            logger.debug(result.to_dict())
     try:
         await asyncio.gather(task_recv_pcm(), task_send_result())
     except WebSocketDisconnect:
@@ -253,6 +255,43 @@ async def get_system_status():
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+class ResultsData(BaseModel):
+    """接收ResultsData数据的模型"""
+    results: List[dict] = Field(..., description="日志数据列表")
+
+@app.post("/api/results", description="Save ResultsData data and export to Excel")
+async def get_results_to_excel(results_data: ResultsData):
+    """
+    接收前端发送的ResultsData数据并导出为Excel
+    """
+    try:
+        results = results_data.results
+        
+        if not results:
+            raise HTTPException(status_code=400, detail="数据为空")
+        
+        # 转换数据格式以匹配ASR导出函数的期望格式
+        # 前端发送的格式: [{"result": "文本", "time": "时间", "idx": 索引}, ...]
+        # ASR函数期望的格式: [{"time": "时间", "result": "文本"}, ...]
+        combined_results = []
+        for result in results:
+            combined_results.append({
+                "time": result.get("time", ""),
+                "result": result.get("result", "")
+            })
+        
+        first_time = combined_results[0]["time"].replace(":", "-").replace(" ", "_")
+        filename = f"asr_results_{first_time}.xlsx"
+        
+        # 导出到 Excel
+        export_to_excel(combined_results, filename)
+        logger.info(f"成功导出 Excel 文件: {filename}")
+        return filename
+        
+    except Exception as e:
+        logger.error(f"导出 Excel 文件失败: {e}")
+        return None
 
 if __name__ == "__main__":
     # 从配置文件获取默认值
