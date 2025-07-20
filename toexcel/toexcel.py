@@ -5,7 +5,7 @@ from openpyxl import load_workbook, Workbook
 import subprocess
 import platform
 
-def export_to_excel(results, filename):
+def export_to_excel(results, filename, dir=None):
     """
     将识别结果导出为 Excel 文件。支持单个数据集和多个数据集（对象数组）。
 
@@ -13,9 +13,12 @@ def export_to_excel(results, filename):
         - 单个数据集：包含识别结果的列表，每个元素是一个字典，格式为 {"time": 时间, "result": 结果}
         - 多个数据集：对象数组，每个对象包含数据和sheet名称，格式为 [{"data": [...], "sheet_name": "..."}, ...]
     :param filename: 导出的 Excel 文件名
+    :param dir: 可选，指定导出目录，默认为"./download"
     """
   
     output_dir = "./download"
+    if dir:
+        output_dir = os.path.join(output_dir, dir)
     os.makedirs(output_dir, exist_ok=True)
 
     # 拼接完整路径
