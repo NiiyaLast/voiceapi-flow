@@ -17,6 +17,7 @@ from datetime import datetime
 from business_logic.business_logic import BusinessLogicRouter
 from config_manager import get_config
 from toexcel.toexcel import export_to_excel 
+import time
 
 app = FastAPI()
 logger = logging.getLogger(__file__)
@@ -28,6 +29,8 @@ except Exception as e:
     logger.error(f"无法加载配置文件，项目必须依赖配置文件才能运行: {e}")
     raise RuntimeError(f"无法加载配置文件，项目必须依赖配置文件才能运行: {e}")
 
+start_mission_time_global = None  # 定义全局变量
+
 # 简化的AI处理API端点
 @app.post("/ai-process-excel", 
           description="Process the latest Excel file with AI analysis")
@@ -36,6 +39,13 @@ async def ai_process_latest_excel():
     处理download目录下最新的Excel文件并进行AI分析
     通过业务逻辑层进行处理
     """
+    global start_mission_time_global
+    if not start_mission_time_global:
+        raise HTTPException(
+            status_code=400,
+            detail="请先开始ASR任务"
+        )
+    task_dir = start_mission_time_global.replace(":", "_").replace(" ", "_").replace("-", "_")
     try:
         # 初始化业务逻辑路由器
         router = BusinessLogicRouter()
@@ -45,7 +55,7 @@ async def ai_process_latest_excel():
         
         
         # 执行完整的业务流程
-        result = processor.execute_task_flow()
+        result = processor.execute_task_flow(task_dir)
         
         if not result['success']:
             raise HTTPException(
@@ -65,8 +75,9 @@ async def websocket_asr(websocket: WebSocket,
                         samplerate: int = Query(config.asr.sample_rate, title="Sample Rate",
                                                 description="The sample rate of the audio."),):
     await websocket.accept()
-
-    asr_stream: ASRStream = await start_asr_stream(samplerate, args)
+    global start_mission_time_global
+    start_mission_time_global = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+    asr_stream: ASRStream = await start_asr_stream(samplerate, args, start_mission_time_global)
     if not asr_stream:
         logger.error("failed to start ASR stream")
         await websocket.close()
@@ -280,12 +291,12 @@ async def get_results_to_excel(results_data: ResultsData):
                 "time": result.get("time", ""),
                 "result": result.get("result", "")
             })
-        
-        first_time = combined_results[0]["time"].replace(":", "-").replace(" ", "_")
-        filename = f"asr_results_{first_time}.xlsx"
-        
+        global start_mission_time_global
+        current_time = start_mission_time_global.replace(":", "_").replace(" ", "_").replace("-", "_")
+        filename = f"asr_results_{current_time}.xlsx"
+
         # 导出到 Excel
-        export_to_excel(combined_results, filename)
+        export_to_excel(combined_results, filename, current_time)
         logger.info(f"成功导出 Excel 文件: {filename}")
         return filename
         
