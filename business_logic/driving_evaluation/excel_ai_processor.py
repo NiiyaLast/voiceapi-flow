@@ -7,6 +7,8 @@ import logging
 import sys
 import glob
 from pathlib import Path
+import tkinter as tk
+from tkinter import filedialog
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -31,59 +33,99 @@ class ExcelAIProcessor:
         logger.info("ExcelAIProcessor初始化成功")
     
     def get_latest_excel_file(self) -> Optional[str]:
-        """获取download目录下最新的以'asr_results_'开头的Excel文件"""
+        """
+        获取download目录下最新的子目录，并从中获取"asr_results_*.xlsx"的文件。
+        """
         download_dir = self.config.storage.download_dir
-        
+    
         if not os.path.exists(download_dir):
             logger.warning(f"下载目录不存在: {download_dir}")
             return None
-        
-        # 定义搜索模式
-        search_patterns = [
-            os.path.join(download_dir, "asr_results_*.xlsx"),
-            os.path.join(download_dir, "asr_results_*.xls")
-        ]
-        
-        # 获取所有匹配的Excel文件
-        excel_files = []
-        for pattern in search_patterns:
-            excel_files.extend(glob.glob(pattern))
-        
-        if not excel_files:
-            logger.info("没有找到以'asr_results_'开头的Excel文件")
+    
+        # 获取所有子目录
+        subdirs = [os.path.join(download_dir, d) for d in os.listdir(download_dir) if os.path.isdir(os.path.join(download_dir, d))]
+        if not subdirs:
+            logger.info("没有找到任何子目录")
             return None
-        
-        # 按修改时间排序，获取最新的文件
-        latest_file = max(excel_files, key=os.path.getmtime)
-        
+    
+        # 按修改时间排序，获取最新的子目录
+        latest_subdir = max(subdirs, key=os.path.getmtime)
+    
+        # 定义搜索模式
+        search_pattern = os.path.join(latest_subdir, "asr_results_*.xlsx")
+    
+        # 获取匹配的Excel文件
+        excel_files = glob.glob(search_pattern)
+        if not excel_files:
+            logger.info(f"最新子目录中没有找到匹配的Excel文件: {latest_subdir}")
+            return None
+    
+        # 获取文件路径
+        latest_file = excel_files[0]  # 假设子目录中只有一个匹配文件
+    
         # 获取文件修改时间用于日志
         file_modified = os.path.getmtime(latest_file)
         modified_time = datetime.fromtimestamp(file_modified).strftime('%Y-%m-%d %H:%M:%S')
-        
+    
         logger.debug(f"找到最新的ASR结果Excel文件: {os.path.basename(latest_file)} (修改时间: {modified_time})")
         return latest_file
     
-    def process_excel_file(self, file_path: Optional[Union[str, Path]] = None) -> List[Dict[str, Any]]:
+    def get_task_file(self, task_path: Optional[Union[str, Path]] = None) -> Optional[str]:
+        """
+        获取指定任务目录下的Excel文件。
+        
+        Args:
+            task_path: 任务目录路径，如果为None则自动获取最新的asr_results文件
+        
+        Returns:
+            Excel文件路径，如果未找到则返回None
+        """
+        if task_path is None:
+            return self.get_latest_excel_file()
+        
+        download_dir = self.config.storage.download_dir
+        task_dir = os.path.join(download_dir, task_path)
+        task_abspath = os.path.abspath(task_dir)
+        if not os.path.exists(task_abspath):
+            logger.warning(f"任务目录不存在: {task_abspath}")
+            return None
+        # 定义搜索模式
+        search_pattern = os.path.join(task_abspath, "asr_results_*.xlsx")
+        # 获取匹配的Excel文件
+        excel_files = glob.glob(search_pattern)
+        if not excel_files:
+            logger.info(f"任务目录中没有找到匹配的Excel文件: {task_abspath}")
+            return None
+        task_file = excel_files[0]
+        return task_file
+
+    def process_excel_file(self, task_path: Optional[Union[str, Path]] = None) -> List[Dict[str, Any]]:
         """
         处理Excel文件的主入口方法
         
         Args:
-            file_path: Excel文件路径，如果为None则自动获取最新的asr_results文件
+            task_path: 任务目录路径
             
         Returns:
             处理后的数据列表，每个元素包含原始数据和AI处理结果
         """
         try:
             # 如果没有提供文件路径，则自动获取最新文件
-            if file_path is None:
-                file_path = self.get_latest_excel_file()
-                if file_path is None:
+            if task_path is not None:
+                # file_path = select_excel_file()   待实现，让用户选择待处理的excel文件             
+                # file_path = self.get_latest_excel_file()
+                task_path = self.get_task_file(task_path)
+                if task_path is None:
                     logger.error("没有找到可处理的Excel文件")
                     return []
-                logger.info(f"自动选择最新文件: {file_path}")
+
+                # if file_path is None:
+                #     logger.error("没有找到可处理的Excel文件")
+                #     return []
+                # # logger.info(f"自动选择最新文件: {file_path}")
             
             # 解析文件路径
-            full_path = self._resolve_file_path(file_path)
+            full_path = self._resolve_file_path(task_path)
             
             # 读取Excel数据
             raw_data = self._read_excel_data(full_path)
@@ -245,7 +287,39 @@ def process_excel_file(file_path: Optional[Union[str, Path]] = None) -> List[Dic
     processor = ExcelAIProcessor()
     return processor.process_excel_file(file_path)
 
+def select_excel_file(initial_dir: str = "./download") -> Optional[str]:
+    """
+    使用文件选择器打开窗口，让用户选择 Excel 文件。
 
+    :param initial_dir: 初始目录，默认为 "./download"
+    :return: 用户选择的文件路径，如果未选择则返回 None
+    """
+    task_dir = os.path.join("./download", initial_dir)
+    try:
+        # 确保任务目录存在
+        if not os.path.exists(task_dir):
+            logger.warning(f"任务目录不存在: {task_dir}")
+            return None
+
+        # 使用 tkinter 打开文件选择窗口
+        root = tk.Tk()
+        root.withdraw()  # 隐藏主窗口
+        file_path = filedialog.askopenfilename(
+            initialdir=os.path.abspath(task_dir),
+            title="选择Excel文件",
+            filetypes=[("Excel文件", "*.xlsx *.xls")]
+        )
+
+        # 验证用户选择的文件路径
+        if not file_path or not os.path.exists(file_path):
+            logger.warning("用户未选择有效文件")
+            return None
+
+        return file_path
+    except Exception as e:
+        logger.error(f"打开文件选择窗口时出错: {e}")
+        return None
+    
 if __name__ == "__main__":
     # 测试代码
     import sys
