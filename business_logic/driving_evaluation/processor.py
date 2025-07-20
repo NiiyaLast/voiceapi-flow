@@ -54,17 +54,19 @@ class DrivingEvaluationProcessor:
         self.export_file = None
         
         logger.info("驾驶评估处理器初始化完成")
-    
-    def execute_task_flow(self) -> Dict[str, Any]:
+
+    def execute_task_flow(self, task_dir: str) -> Dict[str, Any]:
         """
         执行完整的驾驶评估任务流程
-        
-            
+
+        Args:
+            task_dir (str): 任务目录
+
         Returns:
             处理结果字典
         """
         logger.info("开始执行驾驶评估任务流程...")
-        
+        self.task_dir = task_dir
         # 重置流程数据
         self.ai_results = []
         self.expanded_results = []
@@ -88,12 +90,12 @@ class DrivingEvaluationProcessor:
         try:
             print("*" * 50)
             # 步骤1: Excel AI处理
-            logger.info("步骤1: 调用AI处理excel...")
+            logger.info("步骤1: 调用模型处理excel...")
             self._step1_excel_ai_processing()
             result['steps_completed'].append('excel_ai_processing')
             result['records_processed'] = len(self.ai_results)
-            logger.info(f"AI处理完成，处理了{len(self.ai_results)}条记录")
-            
+            logger.info(f"模型处理完成，共处理{len(self.ai_results)}条记录")
+
             # 步骤2: 评分维度展开
             logger.info("步骤2: 开始评分维度展开...")
             self._step2_score_dimension_expansion()
@@ -115,7 +117,7 @@ class DrivingEvaluationProcessor:
             
             # 步骤5: Excel文件生成
             logger.info("步骤5: 生成Excel文件...")
-            self._step5_excel_generation()
+            self._step5_excel_generation(self.task_dir)
             result['steps_completed'].append('excel_generation')
             result['export_file'] = self.export_file
             logger.info(f"Excel文件生成完成: {self.export_file}")
@@ -151,7 +153,7 @@ class DrivingEvaluationProcessor:
                 from excel_ai_processor import process_excel_file
             
             # 调用AI处理
-            self.ai_results = process_excel_file()
+            self.ai_results = process_excel_file(self.task_dir)
             
             if not self.ai_results:
                 logger.warning("excel_ai_processor未返回数据")
@@ -361,20 +363,20 @@ class DrivingEvaluationProcessor:
         except Exception as e:
             logger.error(f"SQL查询获取导出数据失败: {e}")
             raise
-    
-    def _step5_excel_generation(self) -> None:
+
+    def _step5_excel_generation(self, task_dir: str) -> None:
         """步骤5: 调用toexcel.py生成Excel文件"""
         try:
             # 生成文件名
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename_template = self.task_config.get('default_filename_template', 'ai_result_{timestamp}.xlsx')
-            filename = filename_template.format(timestamp=timestamp)
-            
+            filename = self.task_config.get('default_filename_template', 'ai_result_{timestamp}.xlsx')
+            # 使用task_dir替换timestamp
+            filename = filename.format(timestamp=task_dir)
+
             # 确保下载目录存在 - 使用绝对路径
             download_dir = Path(project_root) / 'download'
             download_dir.mkdir(exist_ok=True)
-            output_path = download_dir / filename
-            
+            output_path = download_dir / task_dir / filename
+
             # 格式化数据以适配toexcel
             # formatted_data = self._format_main_data_for_excel(self.export_data)
             
@@ -384,7 +386,6 @@ class DrivingEvaluationProcessor:
             export_to_excel(self.export_data, str(output_path))
             
             self.export_file = str(output_path)
-            logger.info(f"Excel文件生成成功: {self.export_file}")
             
         except Exception as e:
             logger.error(f"Excel文件生成失败: {e}")
