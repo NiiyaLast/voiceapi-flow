@@ -394,8 +394,8 @@ class DrivingEvaluationProcessor:
         """步骤6: 删除表中所有数据"""
         try:
             # 调用数据服务层删除所有记录
-            self.data_service.drop_table("processed_records")
-            self.data_service.drop_table("activity_sessions")
+            self.data_service.delete_all_data_from_table("processed_records")
+            self.data_service.delete_all_data_from_table("activity_sessions")
             logger.info("所有数据已成功删除")
         except Exception as e:
             logger.error(f"删除所有数据失败: {e}")
