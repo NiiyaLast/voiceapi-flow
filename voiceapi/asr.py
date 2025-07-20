@@ -88,7 +88,7 @@ class ASRStream:
             if previous_space_state and not current_space_state:
                 # 松开空格键时，如果有合并的结果，则输出
                 if combined_result.strip():
-                    logger.info(f'松开空格键，输出合并结果: {combined_result.strip()}')
+                    logger.debug(f'松开空格键，输出合并结果: {combined_result.strip()}')
                     # 替换标点
                     # combined_result = combined_result.replace(" ", "")
                     # combined_result = combined_result[:-2].replace("。", "，") + "。"
@@ -185,11 +185,11 @@ class ASRStream:
         self.is_closed = True
         self.outbuf.put_nowait(None)
         # 调用 toexcel.py 的方法，将 self.results 导出为 Excel
-        if self.combined_results:
-            print(self.combined_results)
-            first_time = self.combined_results[0]["time"].replace(":", "-").replace(" ", "_")
-            filename = f"asr_results_{first_time}.xlsx"
-            export_to_excel(self.combined_results, filename)
+        # if self.combined_results:
+        #     print(self.combined_results)
+        #     first_time = self.combined_results[0]["time"].replace(":", "-").replace(" ", "_")
+        #     filename = f"asr_results_{first_time}.xlsx"
+        #     export_to_excel(self.combined_results, filename)
 
     async def write(self, pcm_bytes: bytes):
         pcm_data = np.frombuffer(pcm_bytes, dtype=np.int16)
