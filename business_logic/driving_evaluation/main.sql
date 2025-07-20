@@ -8,7 +8,8 @@ SELECT
     features as 功能性, 
     safety as 安全性, 
     rating as 评价, 
-    ROUND((mental_load + predictability + timely_response + comfort + efficiency + features + safety) / 7.0, 2) as 平均 
+    ROUND((mental_load + predictability + timely_response + comfort + efficiency + features + safety) / 7.0, 2) as 平均,
+    is_clipped as 是否剪辑
 FROM processed_records 
 
 UNION ALL
@@ -27,7 +28,8 @@ SELECT
     ROUND(AVG(features), 2) as 功能性,
     ROUND(AVG(safety), 2) as 安全性,
     '' as 评价,
-    '' as 平均
+    '' as 平均,
+    '' as 是否剪辑
 FROM processed_records
 
 ORDER BY id;
