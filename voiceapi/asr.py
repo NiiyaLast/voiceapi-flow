@@ -6,12 +6,12 @@ import sherpa_onnx
 import os
 import asyncio
 import numpy as np
-from toexcel.toexcel import export_to_excel  # 导入 toexcel.py 中的函数
 import sys
 import keyboard 
 import pygame
 import threading
 import winsound  # Windows系统
+import wave
 
 logger = logging.getLogger(__file__)
 _asr_engines = {}
@@ -28,12 +28,13 @@ class ASRResult:
 
 
 class ASRStream:
-    def __init__(self, recognizer: Union[sherpa_onnx.OnlineRecognizer | sherpa_onnx.OfflineRecognizer], sample_rate: int) -> None:
+    def __init__(self, recognizer: Union[sherpa_onnx.OnlineRecognizer | sherpa_onnx.OfflineRecognizer], sample_rate: int, start_mission_time: str) -> None:
         self.recognizer = recognizer
         self.inbuf = asyncio.Queue()
         self.outbuf = asyncio.Queue()
         self.sample_rate = sample_rate
         self.is_closed = False
+        self.start_mission_time = start_mission_time
         self.online = isinstance(recognizer, sherpa_onnx.OnlineRecognizer)
         self.results = []
         self.combined_results = []  # 用于存储合并的结果
@@ -80,6 +81,7 @@ class ASRStream:
         combined_result = ""  # 用于存储合并的识别结果
         combined_current_time = None  # 用于存储合并的时间结果
         previous_space_state = False  # 记录空格键的前一个状态
+        audio_buffer = []  # 用于存储当前录制的音频数据
         while not self.is_closed:
             samples = await self.inbuf.get()
             current_space_state = keyboard.is_pressed(' ')
@@ -90,13 +92,19 @@ class ASRStream:
                 if combined_result.strip():
                     logger.debug(f'松开空格键，输出合并结果: {combined_result.strip()}')
                     # 替换标点
-                    # combined_result = combined_result.replace(" ", "")
+                    combined_result = combined_result.replace("。", " ")
                     # combined_result = combined_result[:-2].replace("。", "，") + "。"
                     self.outbuf.put_nowait(ASRResult(combined_result.strip(), combined_current_time, True, segment_id))
                     self.combined_results.append({"time": combined_current_time, "result": combined_result})
+
+                    # 调用封装的保存音频函数
+                    if audio_buffer:
+                        save_audio_to_file(audio_buffer, self.sample_rate, self.start_mission_time, combined_current_time)
+
                     segment_id += 1
                     combined_result = ""  # 重置合并结果
                     combined_current_time = None  # 重置时间
+                    audio_buffer = []
         
             # 如果空格没按下，直接丢弃样本，不进行处理
             if not current_space_state:
@@ -111,6 +119,7 @@ class ASRStream:
                 combined_current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
             # 空格已按下，才将音频送入 VAD
             vad.accept_waveform(samples)
+            audio_buffer.append((samples * 32768).astype(np.int16).tobytes())  # 保存原始音频数据
             while not vad.empty() and keyboard.is_pressed(' '):
                 if not st:
                     st = time.time()
@@ -199,6 +208,29 @@ class ASRStream:
     async def read(self) -> ASRResult:
         return await self.outbuf.get()
 
+def save_audio_to_file(audio_buffer: List[bytes], sample_rate: int, start_mission_time: str, current_time: str) -> None:
+    """
+    保存音频到文件
+    :param audio_buffer: 音频数据缓冲区
+    :param sample_rate: 音频采样率
+    :param start_mission_time: 任务开始时间，用于文件夹命名
+    :param current_time: 当前时间，用于文件命名
+    """
+    try:
+        # 创建保存目录
+        save_dir = os.path.join("download", start_mission_time.replace(":", "_").replace(" ", "_").replace("-", "_"), "Audio")
+        os.makedirs(save_dir, exist_ok=True)
+
+        # 保存音频文件
+        audio_file_path = os.path.join(save_dir, f"{current_time.replace(':', '_').replace(' ', '_').replace('-', '_')}.wav")
+        with wave.open(audio_file_path, 'wb') as wf:
+            wf.setnchannels(1)  # 单声道
+            wf.setsampwidth(2)  # 16位音频
+            wf.setframerate(sample_rate)
+            wf.writeframes(b''.join(audio_buffer))
+        logger.info(f"音频保存到: {audio_file_path}")
+    except Exception as e:
+        logger.error(f"保存音频文件失败: {e}")
 
 def create_zipformer(samplerate: int, args) -> sherpa_onnx.OnlineRecognizer:
     d = os.path.join(
@@ -361,10 +393,10 @@ def load_vad_engine(samplerate: int, args, min_silence_duration: float = 0.25, b
     return vad
 
 
-async def start_asr_stream(samplerate: int, args) -> ASRStream:
+async def start_asr_stream(samplerate: int, args, start_mission_time: str) -> ASRStream:
     """
     Start a ASR stream
     """
-    stream = ASRStream(load_asr_engine(samplerate, args), samplerate)
+    stream = ASRStream(load_asr_engine(samplerate, args), samplerate, start_mission_time)
     await stream.start()
     return stream
