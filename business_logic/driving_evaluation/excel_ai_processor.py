@@ -110,19 +110,10 @@ class ExcelAIProcessor:
             处理后的数据列表，每个元素包含原始数据和AI处理结果
         """
         try:
-            # 如果没有提供文件路径，则自动获取最新文件
-            if task_path is not None:
-                # file_path = select_excel_file()   待实现，让用户选择待处理的excel文件             
-                # file_path = self.get_latest_excel_file()
-                task_path = self.get_task_file(task_path)
-                if task_path is None:
-                    logger.error("没有找到可处理的Excel文件")
-                    return []
-
-                # if file_path is None:
-                #     logger.error("没有找到可处理的Excel文件")
-                #     return []
-                # # logger.info(f"自动选择最新文件: {file_path}")
+            task_path = self.get_task_file(task_path)
+            if task_path is None:
+                logger.error("没有找到可处理的Excel文件")
+                return []
             
             # 解析文件路径
             full_path = self._resolve_file_path(task_path)
