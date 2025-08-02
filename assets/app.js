@@ -160,19 +160,99 @@ const demoapp = {
         self.recording = true;
     },
 
-    // 简化的AI处理方法
+    // AI处理方法
     async processWithAI() {
         this.aiProcessing = true;
         this.aiProcessingResult = null;
         
         try {
-            console.log('开始AI处理最新Excel文件...');
+            let selectedTaskDir = '';
             
+            // 使用现代 File System Access API 选择目录
+            if ('showDirectoryPicker' in window) {
+                try {
+                    const dirHandle = await window.showDirectoryPicker();
+                    
+                    selectedTaskDir = dirHandle.name;
+                    console.log('选择的ASR任务目录:', selectedTaskDir);
+                    
+                    // 验证目录名格式（应该是时间戳格式）
+                    if (!selectedTaskDir.match(/^\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}$/)) {
+                        const confirm = window.confirm(`选择的目录名称格式可能不正确：${selectedTaskDir}\n\n期望格式：YYYY_MM_DD_HH_MM_SS\n\n是否继续？`);
+                        if (!confirm) {
+                            return;
+                        }
+                    }
+                    
+                } catch (fsError) {
+                    if (fsError.name === 'AbortError') {
+                        return; // 用户取消
+                    }
+                    throw new Error(`目录选择失败: ${fsError.message}`);
+                }
+                
+            } else {
+                // 回退到传统目录选择
+                const dirInput = document.createElement('input');
+                dirInput.type = 'file';
+                dirInput.webkitdirectory = true;
+                dirInput.multiple = true;
+                dirInput.style.display = 'none';
+                document.body.appendChild(dirInput);
+                
+                const files = await new Promise((resolve, reject) => {
+                    dirInput.onchange = (event) => {
+                        const fileList = Array.from(event.target.files);
+                        if (fileList.length > 0) {
+                            resolve(fileList);
+                        } else {
+                            reject(new Error('未选择目录'));
+                        }
+                    };
+                    
+                    dirInput.oncancel = () => {
+                        reject(new Error('用户取消选择'));
+                    };
+                    
+                    dirInput.click();
+                });
+                
+                // 从第一个文件的路径中提取目录名
+                const firstFile = files[0];
+                const pathParts = firstFile.webkitRelativePath.split('/');
+                selectedTaskDir = pathParts[0];
+                
+                console.log('选择的ASR任务目录:', selectedTaskDir);
+                
+                // 验证目录名格式
+                if (!selectedTaskDir.match(/^\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}$/)) {
+                    const confirm = window.confirm(`选择的目录名称格式可能不正确：${selectedTaskDir}\n\n期望格式：YYYY_MM_DD_HH_MM_SS\n\n是否继续？`);
+                    if (!confirm) {
+                        return;
+                    }
+                }
+                
+                // 清理目录选择器
+                if (dirInput.parentNode) {
+                    dirInput.parentNode.removeChild(dirInput);
+                }
+            }
+            
+            if (!selectedTaskDir) {
+                throw new Error('未选择ASR任务目录');
+            }
+            
+            console.log('最终选择的任务目录:', selectedTaskDir);
+            
+            // 发送任务目录名到后端
             const response = await fetch('/ai-process-excel', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                }
+                },
+                body: JSON.stringify({ 
+                    task_dir: selectedTaskDir
+                })
             });
             
             if (!response.ok) {
@@ -186,12 +266,16 @@ const demoapp = {
             console.log('AI处理完成:', result);
             
             // 显示处理结果
-            const message = `AI处理完成！`;
+            const message = `AI处理完成！任务目录: ${selectedTaskDir}`;
                 
             alert(message);
             
         } catch (error) {
             console.error('AI处理失败:', error);
+            if (error.message === '用户取消选择' || error.message === '未选择目录') {
+                console.log('用户取消了操作');
+                return; // 用户取消不显示错误
+            }
             alert(`AI处理失败: ${error.message}`);
         } finally {
             this.aiProcessing = false;
