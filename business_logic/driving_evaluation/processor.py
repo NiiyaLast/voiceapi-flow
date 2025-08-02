@@ -5,6 +5,7 @@ driving_evaluation任务的具体业务流程执行程序
 import sys
 import os
 from pathlib import Path
+from config_manager import get_config
 
 # 添加项目根目录到Python路径，确保可以导入项目模块
 project_root = Path(__file__).parent.parent.parent
@@ -16,6 +17,7 @@ from datetime import datetime
 from typing import Dict, List, Any
 
 from database.data_service import DataService
+from utils.score_evaluator import ScoreEvaluator
 
 # 根据运行方式选择不同的导入方式
 try:
@@ -243,7 +245,7 @@ class DrivingEvaluationProcessor:
                         continue
                     
                     record_data = {
-                        'timestamp': ai_result.get('time', datetime.now()).isoformat(),
+                        'timestamp': ai_result.get('time', datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
                         'original_text': ai_result.get('original_result', ''),
                         'comment': ai_data.get('comment', ''),
                         'function_type': ai_data.get('function', ''),
@@ -447,42 +449,17 @@ class DrivingEvaluationProcessor:
             raise
     
     def _determine_rating(self, ai_data: Dict[str, Any]) -> str:
-        """确定评级"""
-        # 尝试从多个字段获取评级
-        rating_fields = ['rating', '评级', '等级', 'level']
-        
-        for field in rating_fields:
-            if field in ai_data and ai_data[field]:
-                rating = str(ai_data[field]).lower()
-                # 标准化评级
-                if rating in ['pos', 'good', '好', '优秀']:
-                    return 'pos'
-                elif rating in ['avg', 'average', '中', '一般']:
-                    return 'avg'
-                elif rating in ['neg', 'poor', '差']:
-                    return 'neg'
-                elif rating in ['bad', 'very_poor', '很差', '极差']:
-                    return 'bad'
-        
-        # 如果没有找到评级，根据分数判断
-        score_fields = ['score', '总分', '评分']
-        for field in score_fields:
-            if field in ai_data and ai_data[field] is not None:
-                try:
-                    score = float(ai_data[field])
-                    if score >= 8:
-                        return 'pos'
-                    elif score >= 6:
-                        return 'avg'
-                    elif score >= 4:
-                        return 'neg'
-                    else:
-                        return 'bad'
-                except (ValueError, TypeError):
-                    continue
-        
-        # 默认评级
-        return 'bad'
+        config = get_config()
+        score_mapping = config.get('task.score_mapping', {})
+        field_names = list(score_mapping.values())    # 英文字段名列表
+        # 获取ai_data所有field_names字段的分数并计算平均值
+        scores = [ai_data.get(field, 0) for field in field_names]
+        avg_score = sum(scores) / len(scores) if scores else 0
+
+        # 使用ScoreEvaluator进行评级
+        evaluator = ScoreEvaluator()
+        rating = evaluator.evaluate_score(avg_score)
+        return rating
     
     # def export_data(self, filters: Dict[str, Any] = None) -> str:
     #     """
@@ -553,7 +530,7 @@ class DrivingEvaluationProcessor:
         """存储活动状态到数据库"""
         try:
             status_data = {
-                'timestamp': ai_result.get('time', datetime.now()).isoformat(),
+                'timestamp': ai_result.get('time', datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
                 'original_text': ai_result.get('original_result', ''),
                 'status': ai_data.get('status', ''),
                 'comment': ai_data.get('comment', '')
@@ -581,9 +558,7 @@ class DrivingEvaluationProcessor:
             raise
 
 if __name__ == "__main__":
-    # 测试驾驶评估处理器
-    from config_manager import get_config
-    
+
     config = get_config()
     task_config = config.get('task', {})
     

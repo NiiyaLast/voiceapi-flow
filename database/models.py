@@ -74,7 +74,7 @@ class ProcessedRecord:
     
     def to_dict(self) -> Dict[str, Any]:
         result = {
-            'timestamp': self.timestamp.isoformat(),
+            'timestamp': self.timestamp.strftime('%Y-%m-%d %H:%M:%S') if hasattr(self.timestamp, 'strftime') else self.timestamp,
             'original_text': self.original_text,
             'comment': self.comment,
             'function_type': self.function_type,
