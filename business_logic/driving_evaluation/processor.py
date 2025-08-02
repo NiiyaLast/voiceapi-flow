@@ -356,7 +356,7 @@ class DrivingEvaluationProcessor:
             export_data.append(self._get_main_data())
             export_data.append(self._get_rating_statistics())
             export_data.append(self._get_scene_rating_statistics())
-            self.data_service.delete_all_data_from_table("activity_sessions")
+            # self.data_service.delete_all_data_from_table("activity_sessions")
             export_data.append(self._get_takeover_statistics())
             self.export_data = export_data
             logger.debug(f"SQL查询获取了{len(self.export_data)}个导出对象")
