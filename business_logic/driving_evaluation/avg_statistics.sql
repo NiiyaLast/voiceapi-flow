@@ -1,6 +1,4 @@
 -- 按function_type统计各项评分的平均值
--- 根据main.sql反推的数据表结构：processed_records
--- 输出字段不包含：id, timestamp, original_text, comment, is_clipped
 
 SELECT 
     function_type as 功能类型,
