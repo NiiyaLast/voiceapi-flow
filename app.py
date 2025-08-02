@@ -31,21 +31,37 @@ except Exception as e:
 
 start_mission_time_global = None  # 定义全局变量
 
-# 简化的AI处理API端点
+class ExcelProcessRequest(BaseModel):
+    """Excel文件处理请求模型"""
+    task_dir: str = Field(..., description="ASR任务目录名（时间戳格式）")
+
+# AI处理API端点
 @app.post("/ai-process-excel", 
-          description="Process the latest Excel file with AI analysis")
-async def ai_process_latest_excel():
+          description="Process Excel file from ASR task directory")
+async def ai_process_latest_excel(request: ExcelProcessRequest):
     """
-    处理download目录下最新的Excel文件并进行AI分析
+    处理指定ASR任务目录中的Excel文件并进行AI分析
     通过业务逻辑层进行处理
     """
     global start_mission_time_global
-    if not start_mission_time_global:
+    
+    # 验证目录名格式（时间戳格式）
+    # import re
+    # if not re.match(r'^\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}$', request.task_dir):
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail=f"任务目录名格式不正确: {request.task_dir}，期望格式: YYYY_MM_DD_HH_MM_SS"
+    #     )
+    
+    # 检查目录是否存在
+    import os
+    task_path = os.path.join("download", request.task_dir)
+    if not os.path.exists(task_path):
         raise HTTPException(
-            status_code=400,
-            detail="请先开始ASR任务"
+            status_code=404,
+            detail=f"任务目录不存在: {task_path}"
         )
-    task_dir = start_mission_time_global.replace(":", "_").replace(" ", "_").replace("-", "_")
+    
     try:
         # 初始化业务逻辑路由器
         router = BusinessLogicRouter()
@@ -53,9 +69,8 @@ async def ai_process_latest_excel():
         # 获取对应的任务处理器
         processor = router.route_to_processor()
         
-        
-        # 执行完整的业务流程
-        result = processor.execute_task_flow(task_dir)
+        # 执行完整的业务流程，传入文件路径
+        result = processor.execute_task_flow(request.task_dir)
         
         if not result['success']:
             raise HTTPException(
@@ -64,6 +79,7 @@ async def ai_process_latest_excel():
             )
         
         return
+        
     except HTTPException:
         raise
     except Exception as e:
