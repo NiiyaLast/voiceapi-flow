@@ -28,7 +28,7 @@ SELECT
     ROUND(AVG(features), 2) as 功能性,
     ROUND(AVG(safety), 2) as 安全性,
     '' as 评价,
-    '' as 平均,
+    ROUND(AVG((mental_load + predictability + timely_response + comfort + efficiency + features + safety) / 7.0), 2) as 平均,
     '' as 是否剪辑
 FROM processed_records
 
